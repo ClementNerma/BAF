@@ -1,0 +1,11 @@
+[package]
+name = "baf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.80"
+sha3 = "0.10.8"
+
+[dev-dependencies]
+tempfile = "3.10.0"

@@ -1,0 +1,152 @@
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    path::Path,
+};
+
+use anyhow::{Context, Result};
+
+use super::{ReadableSource, WritableSource};
+
+enum Buffered {
+    Reader(BufReader<File>),
+    Writer(BufWriter<File>),
+}
+
+impl Buffered {
+    pub fn reader(file: &File) -> Result<Self> {
+        let file = file.try_clone().context("Failed to clone file instance")?;
+        Ok(Self::Reader(BufReader::new(file)))
+    }
+
+    pub fn writer(file: &File) -> Result<Self> {
+        let file = file.try_clone().context("Failed to clone file instance")?;
+        Ok(Self::Writer(BufWriter::new(file)))
+    }
+}
+
+pub struct RealFile {
+    file: File,
+    buffered: Buffered,
+    position: u64,
+}
+
+impl RealFile {
+    pub fn open(path: impl AsRef<Path>, create: bool) -> Result<Self> {
+        let file = OpenOptions::new()
+            .create(create)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)?;
+
+        Ok(Self {
+            buffered: Buffered::writer(&file)?,
+            file,
+            position: 0,
+        })
+    }
+
+    fn reader(&mut self) -> Result<&mut BufReader<File>> {
+        match self.buffered {
+            Buffered::Reader(ref mut reader) => return Ok(reader),
+            Buffered::Writer(ref mut prev) => {
+                prev.flush().context("Failed to flush previous writer")?;
+            }
+        }
+
+        self.buffered = Buffered::reader(&self.file)?;
+
+        match &mut self.buffered {
+            Buffered::Reader(reader) => {
+                reader
+                    .seek(SeekFrom::Start(self.position))
+                    .context("Failed to advance reader")?;
+
+                Ok(reader)
+            }
+
+            Buffered::Writer(_) => unreachable!(),
+        }
+    }
+
+    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
+        match self.buffered {
+            Buffered::Reader(_) => {}
+            Buffered::Writer(ref mut writer) => return Ok(writer),
+        }
+
+        self.buffered = Buffered::writer(&self.file)?;
+
+        match self.buffered {
+            Buffered::Reader(_) => unreachable!(),
+            Buffered::Writer(ref mut writer) => {
+                writer
+                    .seek(SeekFrom::Start(self.position))
+                    .context("Failed to advance writer")?;
+
+                Ok(writer)
+            }
+        }
+    }
+}
+
+impl ReadableSource for RealFile {
+    fn position(&mut self) -> Result<u64> {
+        Ok(self.position)
+    }
+
+    fn set_position(&mut self, addr: u64) -> Result<()> {
+        self.position = match &mut self.buffered {
+            Buffered::Reader(reader) => reader
+                .seek(SeekFrom::Start(addr))
+                .context("Failed to set position for reader")?,
+
+            Buffered::Writer(writer) => writer
+                .seek(SeekFrom::Start(addr))
+                .context("Failed to set position for writer")?,
+        };
+
+        assert_eq!(self.position, addr);
+
+        Ok(())
+    }
+
+    fn consume_next(&mut self, bytes: u64) -> Result<Vec<u8>> {
+        let mut vec = vec![0; usize::try_from(bytes).unwrap()];
+
+        self.reader()?
+            .read_exact(&mut vec)
+            .with_context(|| format!("Failed to read {bytes} bytes"))?;
+
+        self.position += bytes;
+
+        Ok(vec)
+    }
+
+    fn len(&self) -> Result<u64> {
+        Ok(self
+            .file
+            .metadata()
+            .context("Failed to get file's metadata")?
+            .len())
+    }
+}
+
+impl WritableSource for RealFile {
+    fn write_all(&mut self, data: &[u8]) -> Result<()> {
+        self.writer()?
+            .write_all(data)
+            .context("Failed to write all of the provided data")?;
+
+        self.position += u64::try_from(data.len()).unwrap();
+
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.writer()?
+            .flush()
+            .context("Failed to flush written data")
+    }
+}
