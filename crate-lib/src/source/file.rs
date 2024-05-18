@@ -32,13 +32,23 @@ pub struct RealFile {
 }
 
 impl RealFile {
-    pub fn open(path: impl AsRef<Path>, create: bool) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(create)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path)?;
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_inner(path, |opts| opts)
+    }
+
+    // pub fn open_or_create(path: impl AsRef<Path>) -> Result<Self> {
+    //     Self::open_inner(path, |opts| opts.create(true))
+    // }
+
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_inner(path, |opts| opts.create_new(true))
+    }
+
+    fn open_inner(
+        path: impl AsRef<Path>,
+        map: impl FnOnce(&mut OpenOptions) -> &mut OpenOptions,
+    ) -> Result<Self> {
+        let file = map(OpenOptions::new().truncate(false).read(true).write(true)).open(path)?;
 
         Ok(Self {
             buffered: Buffered::writer(&file)?,

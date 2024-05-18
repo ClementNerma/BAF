@@ -6,7 +6,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     archive::{Archive, ReadItem},
-    config::Config,
+    config::ArchiveConfig,
     coverage::{Coverage, Segment},
     source::{InMemorySource, RealFile, WritableSource},
 };
@@ -22,12 +22,12 @@ fn test_in_memory() -> Result<()> {
 fn test_on_real_file() -> Result<()> {
     let test_file = NamedTempFile::new().unwrap();
 
-    perform_test_with(RealFile::open(test_file.path(), true).context("Failed to create file")?)
+    perform_test_with(RealFile::open(test_file.path()).context("Failed to create file")?)
 }
 
 fn perform_test_with(source: impl WritableSource) -> Result<()> {
     // Create archive
-    let mut archive = Archive::create(source, Config::default()).unwrap();
+    let mut archive = Archive::create(source, ArchiveConfig::default()).unwrap();
 
     let directory_id = archive.create_directory(None, "dir".to_owned(), 0).unwrap();
 
@@ -77,7 +77,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     let source = archive.close();
 
     // Open archive
-    let (mut archive, _) = Archive::open(source, Config::default()).unwrap();
+    let (mut archive, _) = Archive::open(source, ArchiveConfig::default()).unwrap();
 
     assert_eq!(archive.dirs().count(), 1);
     assert_eq!(archive.dirs().next().unwrap().name, "dir_renamed");

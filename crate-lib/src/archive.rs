@@ -1,10 +1,13 @@
-use std::collections::{hash_map::Values, HashMap, HashSet};
+use std::{
+    collections::{hash_map::Values, HashMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{bail, Context, Result};
 use sha3::{Digest, Sha3_256};
 
 use crate::{
-    config::Config,
+    config::ArchiveConfig,
     coverage::{Coverage, Segment},
     data::{
         directory::{Directory, DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY},
@@ -16,7 +19,7 @@ use crate::{
     diagnostic::Diagnostic,
     easy_archive::EasyArchive,
     file_reader::FileReader,
-    source::{InMemorySource, ReadableSource, WritableSource},
+    source::{InMemorySource, ReadableSource, RealFile, WritableSource},
 };
 
 // TODO: check item names during decoding
@@ -24,7 +27,7 @@ use crate::{
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
 
 pub struct Archive<S: ReadableSource> {
-    conf: Config,
+    conf: ArchiveConfig,
     source: S,
     header: Header,
     file_segments: Vec<FileSegment>,
@@ -35,7 +38,7 @@ pub struct Archive<S: ReadableSource> {
 }
 
 impl<S: ReadableSource> Archive<S> {
-    pub fn open(mut source: S, conf: Config) -> Result<(Self, Vec<Diagnostic>)> {
+    pub fn open(mut source: S, conf: ArchiveConfig) -> Result<(Self, Vec<Diagnostic>)> {
         let mut source_with_header = Header::decode(&mut source)?;
         let header = source_with_header.header;
 
@@ -281,7 +284,7 @@ impl<S: ReadableSource> Archive<S> {
 }
 
 impl<S: WritableSource> Archive<S> {
-    pub fn create(mut source: S, conf: Config) -> Result<Self> {
+    pub fn create(mut source: S, conf: ArchiveConfig) -> Result<Self> {
         let header = Header::default();
 
         let segment = FileSegment {
@@ -858,5 +861,24 @@ impl<'a> ReadItem<'a> {
             ReadItem::Directory(dir) => &dir.name,
             ReadItem::File(file) => &file.name,
         }
+    }
+}
+
+impl Archive<RealFile> {
+    pub fn open_from_file(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<(Self, Vec<Diagnostic>)> {
+        let file = RealFile::open(&path)
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+
+        Self::open(file, conf)
+    }
+
+    pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
+        let file = RealFile::create(&path)
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+
+        Self::create(file, conf)
     }
 }

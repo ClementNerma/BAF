@@ -1,11 +1,11 @@
-pub struct Config {
+pub struct ArchiveConfig {
     pub default_dirs_capacity: u32,
     pub default_files_capacity: u32,
     pub first_segment_files_capacity_override: Option<u32>,
     pub first_segment_dirs_capacity_override: Option<u32>,
 }
 
-impl Default for Config {
+impl Default for ArchiveConfig {
     fn default() -> Self {
         Self {
             default_dirs_capacity: 1024,
