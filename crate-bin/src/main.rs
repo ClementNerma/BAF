@@ -14,7 +14,7 @@ use baf::{
     archive::Archive,
     config::ArchiveConfig,
     data::file::File,
-    easy_archive::{translate_time_for_archive, EasyArchive},
+    easy::{translate_time_for_archive, EasyArchive},
     source::{RealFile, WritableSource},
 };
 use clap::Parser;

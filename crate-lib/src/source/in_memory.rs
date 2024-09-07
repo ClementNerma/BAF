@@ -2,24 +2,35 @@ use anyhow::{bail, Result};
 
 use super::{ReadableSource, WritableSource};
 
+/// An archive reprensentation that's stored exclusively in memory
+///
+/// It does not persist any data.
+/// If you want to store an archive with a file, see [`super::RealFile`] instead.
 pub struct InMemorySource {
     data: Vec<u8>,
     position: u64,
 }
 
 impl InMemorySource {
-    pub fn new(data: Vec<u8>) -> Self {
+    /// Create an empty source
+    pub fn new() -> Self {
+        Self::from_data(vec![])
+    }
+
+    /// Create a new memory source from an existing set of data
+    ///
+    /// Please note that the data's content is not validated for validity.
+    /// Please use at your own risk.
+    pub fn from_data(data: Vec<u8>) -> Self {
         Self { data, position: 0 }
     }
 
-    pub fn empty() -> Self {
-        Self::new(vec![])
-    }
-
+    /// Get the size of the archive in memory (in bytes)
     pub fn size(&self) -> u64 {
         u64::try_from(self.data.len()).unwrap()
     }
 
+    /// Get the underlying array of bytes representing the archive
     pub fn data(&self) -> &[u8] {
         &self.data
     }
@@ -27,7 +38,7 @@ impl InMemorySource {
 
 impl Default for InMemorySource {
     fn default() -> Self {
-        Self::empty()
+        Self::new()
     }
 }
 

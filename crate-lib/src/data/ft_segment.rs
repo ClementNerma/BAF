@@ -8,13 +8,20 @@ use super::{
     header::SourceWithHeader,
 };
 
-pub struct FileSegment {
+/// Representation of a file table segment
+pub struct FileTableSegment {
+    /// Address of the next segment inside the archive
     pub next_segment_addr: Option<u64>,
+
+    /// List of directory slots (each one may be filled or not)
     pub dirs: Vec<Option<Directory>>,
+
+    /// List of file slots (eah one may be filled or not)
     pub files: Vec<Option<File>>,
 }
 
-impl FileSegment {
+impl FileTableSegment {
+    /// Decode a raw file table segment
     pub fn decode(input: &mut SourceWithHeader<impl ReadableSource>) -> Result<Self> {
         // Only there to ensure at compile time there is only one possible version
         ensure_only_one_version!(input.header.version);
@@ -37,6 +44,7 @@ impl FileSegment {
         })
     }
 
+    /// Encode a raw file segment
     pub fn encode(&self) -> Vec<u8> {
         let Self {
             next_segment_addr,

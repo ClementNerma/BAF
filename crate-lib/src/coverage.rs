@@ -4,7 +4,11 @@ use std::collections::BTreeSet;
 // TODO: shrink archive when needed?
 // TODO: update "len" when required
 // TODO: shrink archives when possible
-pub struct Coverage {
+
+/// Compute which parts of an archive's memory is used or not
+///
+/// Allows to quickly find unused space, compute wasted space, and shrink the archive if necessary
+pub(crate) struct Coverage {
     len: u64,
     segments: BTreeSet<Segment>,
 }
@@ -24,6 +28,7 @@ impl Coverage {
 
     // TODO: shrink(&mut self, by: u64)
 
+    /// Mark a zone as used
     pub fn mark_as_used(&mut self, start: u64, len: u64) {
         if len == 0 {
             return;
@@ -40,6 +45,7 @@ impl Coverage {
         self.segments.insert(Segment { start, len });
     }
 
+    /// Mark as zone as free (unused)
     pub fn mark_as_free(&mut self, segment: Segment) {
         if segment.len > 0 {
             // TODO: support non-exact segments
@@ -47,16 +53,19 @@ impl Coverage {
         }
     }
 
+    /// Find the next free (unused) zones
     pub fn find_free_zones(&self) -> FreeSegmentsIter {
         FreeSegmentsIter::new(self)
     }
 
+    /// Find the smallest segment with at least the provided capacity
     pub fn find_free_zone_for(&self, capacity: u64) -> Option<Segment> {
         self.find_free_zones()
             .filter(|zone| zone.len >= capacity)
             .min_by_key(|zone| zone.len)
     }
 
+    /// Find the next writable address (after every segment)
     pub fn next_writable_addr(&self) -> u64 {
         match self.segments.last() {
             Some(last) => last.start + last.len,
@@ -65,6 +74,7 @@ impl Coverage {
     }
 }
 
+/// Representation of a segment
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Segment {
     pub start: u64,
@@ -83,6 +93,7 @@ impl PartialOrd for Segment {
     }
 }
 
+/// Iterator over a list of free segments
 pub struct FreeSegmentsIter<'a> {
     covering: &'a Coverage,
     step: usize,

@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    data::utils::{decode_name, encode_name, none_if_zero},
+    data::utils::{decode_name_from_source, encode_name, none_if_zero},
     ensure_only_one_version,
     source::ReadableSource,
 };
@@ -31,7 +31,7 @@ impl File {
         let file = Self {
             id,
             parent_dir: none_if_zero(input.source.consume_next_value()?),
-            name: decode_name(input.source)?,
+            name: decode_name_from_source(input.source)?,
             modif_time: input.source.consume_next_value()?,
             content_addr: input.source.consume_next_value()?,
             content_len: input.source.consume_next_value()?,

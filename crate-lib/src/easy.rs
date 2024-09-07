@@ -6,32 +6,44 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use crate::{
-    archive::{Archive, ReadItem},
+    archive::{Archive, DirEntry},
     data::{directory::Directory, file::File},
     source::{ReadableSource, WritableSource},
 };
 
+/// Representation of an abstraction over the base [`Archive`] type
+///
+/// This type is easier to use, while the [`Archive`] type is tailored for lower-level manipulations
 pub struct EasyArchive<S: ReadableSource> {
     archive: Archive<S>,
 }
 
 impl<S: ReadableSource> EasyArchive<S> {
+    /// Create from an [`Archive`] value
     pub fn new(archive: Archive<S>) -> Self {
         Self { archive }
     }
 
+    /// Get the underlying [`Archive`] value
     pub fn inner(&self) -> &Archive<S> {
         &self.archive
     }
 
+    /// Get a mutable access to the underlying [`Archive`] value
     pub fn inner_mut(&mut self) -> &mut Archive<S> {
         &mut self.archive
     }
 
+    /// Consume this value to get the underlying [`Archive`] value
     pub fn into_inner(self) -> Archive<S> {
         self.archive
     }
 
+    /// Split a path as a list of components
+    ///
+    /// Handles `.` and `..` symbol, prevents escapes from root
+    ///
+    /// Does not preserve the root symbol (`/` at the beginning of a path)
     pub fn split_path(path: &str) -> Vec<String> {
         let mut out = vec![];
 
@@ -48,8 +60,9 @@ impl<S: ReadableSource> EasyArchive<S> {
         out
     }
 
-    pub fn get_item_at(&self, path: &str) -> Option<ReadItem> {
-        let mut curr_item = None::<ReadItem>;
+    /// Get the item located the provided path
+    pub fn get_item_at(&self, path: &str) -> Option<DirEntry> {
+        let mut curr_item = None::<DirEntry>;
 
         for segment in Self::split_path(path) {
             let curr_id = curr_item.map(|item| item.id());
@@ -65,27 +78,37 @@ impl<S: ReadableSource> EasyArchive<S> {
         curr_item
     }
 
+    /// Get the directory located the provided path
+    ///
+    /// Will return `None` if a file exists at this location
     pub fn get_directory(&self, path: &str) -> Option<&Directory> {
         match self.get_item_at(path) {
-            Some(ReadItem::Directory(dir)) => Some(dir),
-            Some(ReadItem::File(_)) | None => None,
+            Some(DirEntry::Directory(dir)) => Some(dir),
+            Some(DirEntry::File(_)) | None => None,
         }
     }
 
+    /// Get the file located the provided path
+    ///
+    /// Will return `None` if a directory exists at this location
     pub fn get_file(&self, path: &str) -> Option<&File> {
         match self.get_item_at(path) {
-            Some(ReadItem::File(file)) => Some(file),
-            Some(ReadItem::Directory(_)) | None => None,
+            Some(DirEntry::File(file)) => Some(file),
+            Some(DirEntry::Directory(_)) | None => None,
         }
     }
 
-    pub fn read_dir(&self, path: &str) -> Option<impl Iterator<Item = ReadItem>> {
+    /// Iterate over a directory's items
+    pub fn read_dir(&self, path: &str) -> Option<impl Iterator<Item = DirEntry>> {
         let dir = self.get_directory(path)?;
         Some(self.archive.read_dir(Some(dir.id)).unwrap())
     }
 }
 
 impl<S: WritableSource> EasyArchive<S> {
+    /// Get or create a directory
+    ///
+    /// Either returns the existing directory's informations or the newly-created one's
     pub fn get_or_create_dir(&mut self, path: &str) -> Result<Directory> {
         let mut curr_dir = None::<Directory>;
         let mut curr_path = vec![];
@@ -100,8 +123,8 @@ impl<S: WritableSource> EasyArchive<S> {
                 .find(|item| item.name() == segment);
 
             let dir = match item {
-                Some(ReadItem::Directory(dir)) => dir.clone(),
-                Some(ReadItem::File(_)) => bail!(
+                Some(DirEntry::Directory(dir)) => dir.clone(),
+                Some(DirEntry::File(_)) => bail!(
                     "Cannot crate path '{path}' in archive: '{}' is a file",
                     curr_path.join("/")
                 ),
@@ -123,7 +146,8 @@ impl<S: WritableSource> EasyArchive<S> {
         curr_dir.context("Cannot get or create root directory in archive")
     }
 
-    pub fn create_directory(&mut self, path: &str, modif_time: u64) -> Result<()> {
+    /// Create a directory
+    pub fn create_directory(&mut self, path: &str, modif_time: u64) -> Result<u64> {
         let mut path = Self::split_path(path);
 
         let filename = path.pop().context("Path cannot be empty")?;
@@ -136,11 +160,10 @@ impl<S: WritableSource> EasyArchive<S> {
 
         self.archive
             .create_directory(parent_dir, filename, modif_time)
-            .context("Failed to create file")?;
-
-        Ok(())
+            .context("Failed to create file")
     }
 
+    /// Either create a file with or replace an existing one
     pub fn create_or_update_file(
         &mut self,
         path: &str,
@@ -170,6 +193,9 @@ impl<S: WritableSource> EasyArchive<S> {
         Ok(())
     }
 
+    /// Create a file at the provided path and the provided content
+    ///
+    /// Will fail if a file already exists at this location
     pub fn create_file(
         &mut self,
         path: &str,
@@ -183,6 +209,7 @@ impl<S: WritableSource> EasyArchive<S> {
         self.create_or_update_file(path, content, modif_time)
     }
 
+    /// Update an existing file
     pub fn update_file(
         &mut self,
         path: &str,
@@ -196,68 +223,33 @@ impl<S: WritableSource> EasyArchive<S> {
         self.create_or_update_file(path, content, modif_time)
     }
 
-    pub fn remove_directory(&mut self, path: &str) -> Result<Directory> {
+    /// Remove a directory, recursively
+    pub fn remove_directory(&mut self, path: &str) -> Result<()> {
         let dir = self
             .get_directory(path)
             .context("Provided directory was not found")?;
 
-        self.archive.remove_directory(dir.id)
+        self.archive.remove_directory(dir.id)?;
+
+        Ok(())
     }
 
-    pub fn remove_file(&mut self, path: &str) -> Result<File> {
+    /// Remove a file
+    pub fn remove_file(&mut self, path: &str) -> Result<()> {
         let file = self.get_file(path).context("Provided file was not found")?;
 
-        self.archive.remove_file(file.id)
+        self.archive.remove_file(file.id)?;
+
+        Ok(())
     }
 
+    /// Flush all changes (e.g. to the disk)
     pub fn flush(&mut self) -> Result<()> {
         self.archive.flush()
     }
 }
 
-// pub fn split_path(path: &str) -> Result<Vec<String>> {
-//     let mut out = vec![];
-
-//     let path = path
-//         .strip_prefix('/')
-//         .or_else(|| path.strip_prefix('\\'))
-//         .unwrap_or(path);
-
-//     for component in Path::new(path).components() {
-//         match component {
-//             Component::Prefix(prefix) => {
-//                 bail!(
-//                     "Prefixes (like '{:?}') are not supported in archive paths",
-//                     prefix.as_os_str()
-//                 )
-//             }
-
-//             Component::RootDir => {
-//                 bail!("Root directory marker is not supported in archive paths");
-//             }
-
-//             Component::CurDir => {
-//                 bail!("Current directory (.) marker is not supported in archive paths")
-//             }
-
-//             Component::ParentDir => {
-//                 bail!("Parent directory (..) marker is not supported in archive paths")
-//             }
-
-//             Component::Normal(normal) => {
-//                 out.push(
-//                     normal
-//                         .to_str()
-//                         .context("Only valid UTF-8 paths are supported inside archives")?
-//                         .to_owned(),
-//                 );
-//             }
-//         }
-//     }
-
-//     Ok(out)
-// }
-
+/// Translate a [`SystemTime`] into a timestamp for an archive
 pub fn translate_time_for_archive(time: SystemTime) -> u64 {
     time.duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()

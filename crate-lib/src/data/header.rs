@@ -5,8 +5,13 @@ use crate::{ensure_only_one_version, source::ReadableSource};
 pub static MAGIC_NUMBER: &[u8] = b"BASICARC";
 pub static HEADER_SIZE: u64 = 256;
 
+/// Representation of an archive's header
+///
+/// This may contain other fields in the future.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct Header {
+    /// Version of the header
     pub version: ArchiveVersion,
 }
 

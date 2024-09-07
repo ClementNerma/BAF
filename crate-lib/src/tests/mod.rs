@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
 
 use crate::{
-    archive::{Archive, ReadItem},
+    archive::{Archive, DirEntry},
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
     source::{InMemorySource, RealFile, WritableSource},
@@ -36,7 +36,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             Some(directory_id),
             "file".to_owned(),
             0,
-            InMemorySource::new(FILE_CONTENT.to_vec()),
+            InMemorySource::from_data(FILE_CONTENT.to_vec()),
         )
         .unwrap();
 
@@ -53,7 +53,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             None,
             "should be removed".to_owned(),
             0,
-            InMemorySource::empty(),
+            InMemorySource::new(),
         )?;
         archive.remove_file(file)?;
 
@@ -68,7 +68,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             Some(dir),
             "should be removed".to_owned(),
             0,
-            InMemorySource::empty(),
+            InMemorySource::new(),
         )?;
 
         archive.remove_directory(dir)?;
@@ -87,12 +87,12 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
 
     assert_eq!(archive.read_dir(None).unwrap().count(), 1);
     assert!(
-        matches!(archive.read_dir(None).unwrap().next().unwrap(), ReadItem::Directory(dir) if dir.name == "dir_renamed")
+        matches!(archive.read_dir(None).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name == "dir_renamed")
     );
 
     assert_eq!(archive.read_dir(Some(1)).unwrap().count(), 1);
     assert!(
-        matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), ReadItem::File(file) if file.name == "file_renamed")
+        matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), DirEntry::File(file) if file.name == "file_renamed")
     );
 
     assert_eq!(archive.get_file_content(2).unwrap(), FILE_CONTENT);

@@ -11,3 +11,7 @@ The main advantages of BAF are:
 * Renamings don't need any rebuild either
 
 The format is also designed to be extremely simple and almost anybody can make an encoder / decoder for it. You can see the whole specifications in the [`docs/specs.md`](docs/specs.md) document.
+
+## Design and limitations
+
+* All item names must be made of valid UTF-8 characters

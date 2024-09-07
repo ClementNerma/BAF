@@ -12,12 +12,12 @@ use crate::{
     data::{
         directory::{Directory, DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY},
         file::{File, FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY},
-        file_segment::FileSegment,
+        ft_segment::FileTableSegment,
         header::{Header, HEADER_SIZE},
         utils::encode_name,
     },
     diagnostic::Diagnostic,
-    easy_archive::EasyArchive,
+    easy::EasyArchive,
     file_reader::FileReader,
     source::{InMemorySource, ReadableSource, RealFile, WritableSource},
 };
@@ -26,11 +26,14 @@ use crate::{
 // TODO: check if parent dirs do exist during decoding
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
 
+/// Representation of an archive
+///
+/// This type is designed for pretty low-level stuff, for easier manipulation see the [`Archive::easy`] method.
 pub struct Archive<S: ReadableSource> {
     conf: ArchiveConfig,
     source: S,
     header: Header,
-    file_segments: Vec<FileSegment>,
+    file_segments: Vec<FileTableSegment>,
     dirs: HashMap<u64, Directory>,
     files: HashMap<u64, File>,
     names_in_dirs: HashMap<Option<u64>, HashSet<String>>,
@@ -38,6 +41,11 @@ pub struct Archive<S: ReadableSource> {
 }
 
 impl<S: ReadableSource> Archive<S> {
+    /// Open an existing archive
+    ///
+    /// May return a set of warnings about ill-formed archives
+    ///
+    /// Will read the entire archive's metadata segments before returning.
     pub fn open(mut source: S, conf: ArchiveConfig) -> Result<(Self, Vec<Diagnostic>)> {
         let mut source_with_header = Header::decode(&mut source)?;
         let header = source_with_header.header;
@@ -46,7 +54,7 @@ impl<S: ReadableSource> Archive<S> {
 
         let mut file_segments = vec![];
         let mut file_segments_addr = vec![HEADER_SIZE];
-        let mut prev_segment = FileSegment::decode(&mut source_with_header)?;
+        let mut prev_segment = FileTableSegment::decode(&mut source_with_header)?;
 
         while let Some(next_segment) = prev_segment.consume_next_segment(&mut source_with_header) {
             file_segments.push(prev_segment);
@@ -68,24 +76,26 @@ impl<S: ReadableSource> Archive<S> {
 
         let dirs = file_segments
             .iter()
-            .flat_map(FileSegment::dirs)
+            .flat_map(FileTableSegment::dirs)
             .flatten()
             .map(|dir| (dir.id, dir.clone()))
             .collect();
 
         let files = file_segments
             .iter()
-            .flat_map(FileSegment::files)
+            .flat_map(FileTableSegment::files)
             .flatten()
             .map(|file| (file.id, file.clone()))
             .collect();
+
+        let names_in_dirs = Self::compute_names_in_dirs(&file_segments, &mut diags);
 
         Ok((
             Self {
                 source,
                 conf,
                 header,
-                names_in_dirs: Self::compute_names_in_dirs(&file_segments, &mut diags),
+                names_in_dirs,
                 files,
                 dirs,
                 file_segments,
@@ -95,26 +105,32 @@ impl<S: ReadableSource> Archive<S> {
         ))
     }
 
+    /// Get an [`crate::easy::EasyArchive`] abstraction for easier handling of this archive.
     pub fn easy(self) -> EasyArchive<S> {
         EasyArchive::new(self)
     }
 
+    /// Get the content of the archive's header
     pub fn header(&self) -> &Header {
         &self.header
     }
 
+    /// Get the list of all directories contained inside the archive
     pub fn dirs(&self) -> Values<u64, Directory> {
         self.dirs.values()
     }
 
+    /// Get the list of all files contained inside the archive
     pub fn files(&self) -> Values<u64, File> {
         self.files.values()
     }
 
+    /// Get informations about a directory from the archive
     pub fn get_dir(&self, id: u64) -> Option<&Directory> {
         self.dirs.get(&id)
     }
 
+    /// Get informations about a file from the archive
     pub fn get_file(&self, id: u64) -> Option<&File> {
         self.files.get(&id)
     }
@@ -131,7 +147,8 @@ impl<S: ReadableSource> Archive<S> {
         }
     }
 
-    pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = ReadItem>> {
+    /// Iterate over all items inside a directory contained inside the archive
+    pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = DirEntry>> {
         if let Some(id) = id {
             if !self.dirs.contains_key(&id) {
                 return None;
@@ -142,17 +159,18 @@ impl<S: ReadableSource> Archive<S> {
             .dirs
             .values()
             .filter(move |dir| dir.parent_dir == id)
-            .map(ReadItem::Directory);
+            .map(DirEntry::Directory);
 
         let files = self
             .files
             .values()
             .filter(move |file| file.parent_dir == id)
-            .map(ReadItem::File);
+            .map(DirEntry::File);
 
         Some(dirs.chain(files))
     }
 
+    /// Get the content of a file contained inside the archive
     pub fn get_file_content(&mut self, id: u64) -> Result<Vec<u8>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
@@ -175,6 +193,7 @@ impl<S: ReadableSource> Archive<S> {
         Ok(bytes)
     }
 
+    /// Get a [`crate::file_reader::FileReader`] over a file contained inside the archive
     pub fn get_file_reader(&mut self, id: u64) -> Result<FileReader<S>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
@@ -224,7 +243,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     fn compute_coverage<'a>(
-        file_segments: impl IntoIterator<Item = (u64, &'a FileSegment)>,
+        file_segments: impl IntoIterator<Item = (u64, &'a FileTableSegment)>,
         len: u64,
     ) -> Coverage {
         let mut coverage = Coverage::new(len);
@@ -242,7 +261,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     fn compute_names_in_dirs<'a>(
-        file_segments: impl IntoIterator<Item = &'a FileSegment>,
+        file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
         diags: &mut Vec<Diagnostic>,
     ) -> HashMap<Option<u64>, HashSet<String>> {
         let mut names_in_dirs = HashMap::from([(None, HashSet::new())]);
@@ -284,16 +303,17 @@ impl<S: ReadableSource> Archive<S> {
 }
 
 impl<S: WritableSource> Archive<S> {
+    /// Create a new archive
     pub fn create(mut source: S, conf: ArchiveConfig) -> Result<Self> {
         let header = Header::default();
 
-        let segment = FileSegment {
+        let segment = FileTableSegment {
             next_segment_addr: None,
             dirs: vec![
                 None;
                 usize::try_from(
                     conf.first_segment_dirs_capacity_override
-                        .unwrap_or(conf.default_dirs_capacity)
+                        .unwrap_or(conf.default_dirs_capacity_by_ft_segment)
                 )
                 .unwrap()
             ],
@@ -302,7 +322,7 @@ impl<S: WritableSource> Archive<S> {
                 None;
                 usize::try_from(
                     conf.first_segment_files_capacity_override
-                        .unwrap_or(conf.default_files_capacity)
+                        .unwrap_or(conf.default_files_capacity_by_ft_segment)
                 )
                 .unwrap()
             ],
@@ -360,15 +380,21 @@ impl<S: WritableSource> Archive<S> {
 
     // returns address of first entry
     fn create_segment(&mut self) -> Result<usize> {
-        let segment = FileSegment {
+        let segment = FileTableSegment {
             next_segment_addr: None,
-            dirs: vec![None; usize::try_from(self.conf.default_dirs_capacity).unwrap()],
-            files: vec![None; usize::try_from(self.conf.default_files_capacity).unwrap()],
+            dirs: vec![
+                None;
+                usize::try_from(self.conf.default_dirs_capacity_by_ft_segment).unwrap()
+            ],
+            files: vec![
+                None;
+                usize::try_from(self.conf.default_files_capacity_by_ft_segment).unwrap()
+            ],
         };
 
         // Write new segment
         let (new_segment_addr, _) =
-            self.write_data_where_possible(InMemorySource::new(segment.encode()))?;
+            self.write_data_where_possible(InMemorySource::from_data(segment.encode()))?;
 
         // Update previous segment's 'next address'
         self.source
@@ -481,6 +507,9 @@ impl<S: WritableSource> Archive<S> {
         }
     }
 
+    /// Create a new directory
+    ///
+    /// Modification time is in seconds since Unix' Epoch
     pub fn create_directory(
         &mut self,
         parent_dir: Option<u64>,
@@ -536,6 +565,11 @@ impl<S: WritableSource> Archive<S> {
         Ok(id)
     }
 
+    /// Create a new file
+    ///
+    /// Modification time is in seconds since Unix' Epoch
+    ///
+    /// Content is provided through a [`crate::source::ReadableSource`]
     pub fn create_file(
         &mut self,
         parent_dir: Option<u64>,
@@ -605,6 +639,8 @@ impl<S: WritableSource> Archive<S> {
     }
 
     // TODO: re-use the space used by the file (if relevant)
+
+    /// Overwrite an existing file's content and modification time
     pub fn replace_file_content(
         &mut self,
         id: u64,
@@ -653,6 +689,7 @@ impl<S: WritableSource> Archive<S> {
         Ok(())
     }
 
+    /// Rename a directory
     pub fn rename_directory(&mut self, id: u64, new_name: String) -> Result<()> {
         let SegmentEntry {
             segment_index,
@@ -685,6 +722,7 @@ impl<S: WritableSource> Archive<S> {
         Ok(())
     }
 
+    /// Rename a file
     pub fn rename_file(&mut self, id: u64, new_name: String) -> Result<()> {
         let SegmentEntry {
             segment_index,
@@ -717,6 +755,9 @@ impl<S: WritableSource> Archive<S> {
         Ok(())
     }
 
+    /// Remove a directory, recursively
+    ///
+    /// Returns the removed directory entry
     pub fn remove_directory(&mut self, id: u64) -> Result<Directory> {
         let SegmentEntry {
             segment_index,
@@ -785,6 +826,9 @@ impl<S: WritableSource> Archive<S> {
         Ok(dir)
     }
 
+    /// Remove a file
+    ///
+    /// Returns the removed file entry
     pub fn remove_file(&mut self, id: u64) -> Result<File> {
         let SegmentEntry {
             segment_index,
@@ -821,10 +865,14 @@ impl<S: WritableSource> Archive<S> {
         Ok(file)
     }
 
+    /// Flush all changes
     pub fn flush(&mut self) -> Result<()> {
         self.source.flush()
     }
 
+    /// Close the archive
+    ///
+    /// Returns the original source provided at type construction
     pub fn close(self) -> S {
         self.source
     }
@@ -842,29 +890,31 @@ struct SegmentEntry {
     entry_addr: u64,
 }
 
+/// Entry in a directory
 #[derive(Debug, Clone)]
-pub enum ReadItem<'a> {
+pub enum DirEntry<'a> {
     Directory(&'a Directory),
     File(&'a File),
 }
 
-impl<'a> ReadItem<'a> {
+impl<'a> DirEntry<'a> {
     pub fn id(&self) -> u64 {
         match self {
-            ReadItem::Directory(dir) => dir.id,
-            ReadItem::File(file) => file.id,
+            DirEntry::Directory(dir) => dir.id,
+            DirEntry::File(file) => file.id,
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            ReadItem::Directory(dir) => &dir.name,
-            ReadItem::File(file) => &file.name,
+            DirEntry::Directory(dir) => &dir.name,
+            DirEntry::File(file) => &file.name,
         }
     }
 }
 
 impl Archive<RealFile> {
+    /// Open from a file (on-disk)
     pub fn open_from_file(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
@@ -875,6 +925,7 @@ impl Archive<RealFile> {
         Self::open(file, conf)
     }
 
+    /// Create an archive into a file
     pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
         let file = RealFile::create(&path)
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;

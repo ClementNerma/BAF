@@ -4,6 +4,11 @@ use sha3::{Digest, Sha3_256};
 
 use crate::source::ReadableSource;
 
+/// Abstraction over a file with checksum verification
+///
+/// Designed to be used for reading / extracting files from BAF archives.
+///
+/// **NOTE:** Checksum validation only occurs *after* the very last byte has been read.
 pub struct FileReader<'a, S: ReadableSource> {
     source: &'a mut S,
     len: u64,
@@ -44,7 +49,7 @@ impl<'a, S: ReadableSource> FileReader<'a, S> {
 
 impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.pos == self.len {
+        if self.len == 0 {
             self.validate_checksum_after_reading()?;
             return Ok(0);
         }

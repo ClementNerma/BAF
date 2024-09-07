@@ -8,23 +8,9 @@ use anyhow::{Context, Result};
 
 use super::{ReadableSource, WritableSource};
 
-enum Buffered {
-    Reader(BufReader<File>),
-    Writer(BufWriter<File>),
-}
-
-impl Buffered {
-    pub fn reader(file: &File) -> Result<Self> {
-        let file = file.try_clone().context("Failed to clone file instance")?;
-        Ok(Self::Reader(BufReader::new(file)))
-    }
-
-    pub fn writer(file: &File) -> Result<Self> {
-        let file = file.try_clone().context("Failed to clone file instance")?;
-        Ok(Self::Writer(BufWriter::new(file)))
-    }
-}
-
+/// Representation of a real file (e.g. on-disk)
+///
+/// Uses buffer reading and writing
 pub struct RealFile {
     file: File,
     buffered: Buffered,
@@ -32,14 +18,12 @@ pub struct RealFile {
 }
 
 impl RealFile {
+    /// Open an existing archive (must already exist)
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_inner(path, |opts| opts)
     }
 
-    // pub fn open_or_create(path: impl AsRef<Path>) -> Result<Self> {
-    //     Self::open_inner(path, |opts| opts.create(true))
-    // }
-
+    /// Create a new archive (will not write any data by itself)
     pub fn create(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_inner(path, |opts| opts.create_new(true))
     }
@@ -57,6 +41,7 @@ impl RealFile {
         })
     }
 
+    /// Get a buffered reader
     fn reader(&mut self) -> Result<&mut BufReader<File>> {
         match self.buffered {
             Buffered::Reader(ref mut reader) => return Ok(reader),
@@ -80,6 +65,7 @@ impl RealFile {
         }
     }
 
+    /// Get a buffered writer
     fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         match self.buffered {
             Buffered::Reader(_) => {}
@@ -158,5 +144,23 @@ impl WritableSource for RealFile {
         self.writer()?
             .flush()
             .context("Failed to flush written data")
+    }
+}
+
+/// Allow a [`RealFile`] to switch between a reader and a writer
+enum Buffered {
+    Reader(BufReader<File>),
+    Writer(BufWriter<File>),
+}
+
+impl Buffered {
+    pub fn reader(file: &File) -> Result<Self> {
+        let file = file.try_clone().context("Failed to clone file instance")?;
+        Ok(Self::Reader(BufReader::new(file)))
+    }
+
+    pub fn writer(file: &File) -> Result<Self> {
+        let file = file.try_clone().context("Failed to clone file instance")?;
+        Ok(Self::Writer(BufWriter::new(file)))
     }
 }

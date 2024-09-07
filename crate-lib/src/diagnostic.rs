@@ -1,12 +1,15 @@
 use std::fmt::Display;
 
+/// Diagnostic emitted while checking an archive's correctness
 pub enum Diagnostic {
+    /// A directory takes a name that's already used
     DirTakesExistingName {
         parent_dir_id: Option<u64>,
         dir_id: u64,
         name: String,
     },
 
+    /// A file takes a name that's already use
     FileTakesExistingName {
         parent_dir_id: Option<u64>,
         file_id: u64,
@@ -15,6 +18,7 @@ pub enum Diagnostic {
 }
 
 impl Diagnostic {
+    /// Get the severity of a given diagnostic
     pub fn severity(&self) -> Severity {
         match self {
             Diagnostic::DirTakesExistingName {
@@ -70,6 +74,7 @@ impl Display for Diagnostic {
     }
 }
 
+/// Severity of a diagnostic
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
     Low,

@@ -1,3 +1,7 @@
+//! Collection of source types from which an archive can be read
+//!
+//! See [`file::RealFile`] and [`in_memory::InMemorySource`]
+
 mod file;
 mod in_memory;
 
@@ -5,29 +9,62 @@ pub use self::{file::RealFile, in_memory::InMemorySource};
 
 use anyhow::Result;
 
+/// A readable source
+///
+/// It contains a cursor, which starts at byte 0.
 #[allow(clippy::len_without_is_empty)]
 pub trait ReadableSource {
+    /// Get the cursor's position (offset in bytes)
     fn position(&mut self) -> Result<u64>;
+
+    /// Set the cursor's position (offset in bytes)
     fn set_position(&mut self, addr: u64) -> Result<()>;
 
+    /// Consume the amount of provided bytes after the current position,
+    /// then advance the cursor by the same amount of bytes.
     fn consume_next(&mut self, bytes: u64) -> Result<Vec<u8>>;
+
+    /// Consume a value that will manipulate the source itself
     fn consume_next_value<F: FromSourceBytes>(&mut self) -> Result<F>
     where
         Self: Sized,
     {
-        F::decode(self)
+        let pos = self.position()?;
+        let result = F::decode(self);
+
+        // Ensure the cursor didn't go backwards
+        assert!(self.position()? >= pos);
+
+        result
     }
 
+    /// Get the total length, in bytes
     fn len(&self) -> Result<u64>;
 }
 
+/// A writable wource
+///
+/// It acts as a [`ReadableSource`] that also happens to be writable at the same time.
 #[allow(clippy::len_without_is_empty)]
 pub trait WritableSource: ReadableSource {
+    /// Write all the provided data and advance the cursor by the provided data's length
+    ///
+    /// Writes don't need to be persisted (e.g. to the disk) before a call to [`WritableSource::flush`] occurs.
     fn write_all(&mut self, data: &[u8]) -> Result<()>;
+
+    /// Save all changes (e.g. to the disk)
+    ///
+    /// This function may not return before changes have been throroughly saved.
+    ///
+    /// This allows the program to exit after ensuring the archive is in a consistent state.
     fn flush(&mut self) -> Result<()>;
 }
 
+/// Type that can manipulate a readable source to get data
 pub trait FromSourceBytes {
+    /// Decode the value type from a readable source
+    ///
+    /// The reader's cursor must not go backwards.
     fn decode(source: &mut impl ReadableSource) -> Result<Self>
     where
         Self: Sized;

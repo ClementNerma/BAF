@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    data::utils::{decode_name, encode_name, none_if_zero},
+    data::utils::{decode_name_from_source, encode_name, none_if_zero},
     ensure_only_one_version,
     source::ReadableSource,
 };
@@ -11,22 +11,31 @@ use super::header::SourceWithHeader;
 pub static DIRECTORY_ENTRY_SIZE: u64 = 280;
 pub static DIRECTORY_NAME_OFFSET_IN_ENTRY: u64 = 16;
 
+/// Representation of a directory inside an archive
 #[derive(Debug, Clone)]
 pub struct Directory {
+    /// Unique identifier (in the archive)
     pub id: u64,
+
+    /// Unique identifier of the parent directory
     pub parent_dir: Option<u64>,
+
+    /// Name of the file (must be valid UTF-8)
     pub name: String,
+
+    /// Modification time, in seconds since Unix' Epoch
     pub modif_time: u64,
 }
 
 impl Directory {
+    /// Decode a raw directory entry from an archive
     pub fn decode(input: &mut SourceWithHeader<impl ReadableSource>) -> Result<Option<Self>> {
         ensure_only_one_version!(input.header.version);
 
         let directory = Self {
             id: input.source.consume_next_value()?,
             parent_dir: none_if_zero(input.source.consume_next_value()?),
-            name: decode_name(input.source)?,
+            name: decode_name_from_source(input.source)?,
             modif_time: input.source.consume_next_value()?,
         };
 
@@ -37,6 +46,7 @@ impl Directory {
         })
     }
 
+    /// Encode as a raw directory entry
     pub fn encode(&self) -> Vec<u8> {
         let Self {
             id,

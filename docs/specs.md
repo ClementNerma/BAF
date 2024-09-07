@@ -2,19 +2,19 @@
 
 - [Header](#header) (256 bytes)
 - First [file table segment](#file-table-segment)
-- Blobs
+- Blobs (content of files)
 
 The names and blobs section are organized in a sequential manner ; they are completely unstructured.
 
 ## Header
 
 - Magic number (8 bytes): ASCII-encoded `BASICARC`
-- Archive version (4 bytes)
-- _Future-proof_ up to 256th byte, filled with zeroes
+- Archive version (4 bytes), little endian, `0x1` is the very first version
+- _Future-proof_ (250 bytes), filled with zeroes
 
 ## File table
 
-File table is made of one or several [segments](#file-table-segment).
+The file table is made of one or several [segments](#file-table-segment), that may not be located one after the other.
 
 ### File table segment
 
