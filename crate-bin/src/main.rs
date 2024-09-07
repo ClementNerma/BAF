@@ -12,7 +12,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use baf::{
     archive::Archive,
-    config::Config,
+    config::ArchiveConfig,
     data::file::File,
     easy_archive::{translate_time_for_archive, EasyArchive},
     source::{RealFile, WritableSource},
@@ -44,17 +44,13 @@ fn inner_main() -> Result<()> {
                 bail!("Path {} already exists", path.display());
             }
 
-            let file = RealFile::open(&path, true).context("Failed to create file")?;
-
-            Archive::create(file, Config::default()).context("Failed to create archive")?;
+            Archive::create_as_file(path, ArchiveConfig::default())
+                .context("Failed to create archive")?;
         }
 
         Command::List { path } => {
-            let file = RealFile::open(&path, false)
-                .with_context(|| format!("Failed to open file at {}", path.display()))?;
-
-            let (archive, diags) =
-                Archive::open(file, Config::default()).context("Failed to open archive")?;
+            let (archive, diags) = Archive::open_from_file(path, ArchiveConfig::default())
+                .context("Failed to open archive")?;
 
             for diag in diags {
                 eprintln!("WARNING: {diag}");
@@ -97,23 +93,24 @@ fn inner_main() -> Result<()> {
                 bail!("No item found at path '{}'", item_path.display());
             }
 
-            let existing_archive = path.exists();
+            let config = ArchiveConfig::default();
 
-            let file = RealFile::open(&path, !existing_archive)
-                .with_context(|| format!("Failed to open file at path '{}'", path.display()))?;
+            let archive = if path.exists() {
+                let (archive, diags) =
+                    Archive::open_from_file(&path, config).with_context(|| {
+                        format!("Failed to open archive at path '{}'", path.display())
+                    })?;
 
-            let (archive, diags) = if existing_archive {
-                Archive::open(file, Config::default()).context("Failed to open archive")?
+                for diag in diags {
+                    eprintln!("WARNING: {diag}");
+                }
+
+                archive
             } else {
-                (
-                    Archive::create(file, Config::default()).context("Failed to create archive")?,
-                    vec![],
-                )
+                Archive::create_as_file(&path, config).with_context(|| {
+                    format!("Failed to create archive at path '{}'", path.display())
+                })?
             };
-
-            for diag in diags {
-                eprintln!("WARNING: {diag}");
-            }
 
             let mut archive = archive.easy();
 
@@ -213,7 +210,7 @@ fn add_item_to_archive(
     else if item_path.is_file() {
         println!("Adding file {item_path_display}...");
 
-        let content = RealFile::open(item_path, false)
+        let content = RealFile::open(item_path)
             .with_context(|| format!("Failed to open file at path '{}'", item_path.display()))?;
 
         archive
