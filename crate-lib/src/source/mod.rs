@@ -30,7 +30,7 @@ pub trait ReadableSource {
         Self: Sized,
     {
         let pos = self.position()?;
-        let result = F::decode(self);
+        let result = F::decode(&mut |bytes| self.consume_next(bytes));
 
         // Ensure the cursor didn't go backwards
         assert!(self.position()? >= pos);
@@ -64,63 +64,58 @@ pub trait WritableSource: ReadableSource {
 pub trait FromSourceBytes {
     /// Decode the value type from a readable source
     ///
-    /// The reader's cursor must not go backwards.
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    /// The provided function allows to try to read the next amount of the provided bytes,
+    /// advancing the reader's cursor from the same amount in the process.
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized;
 }
 
 impl FromSourceBytes for u8 {
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized,
     {
-        source.consume_next(1).map(|bytes| *bytes.first().unwrap())
+        read(1).map(|bytes| *bytes.first().unwrap())
     }
 }
 
 impl FromSourceBytes for u16 {
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized,
     {
-        source
-            .consume_next(2)
-            .map(|bytes| u16::from_be_bytes(bytes.try_into().unwrap()))
+        read(2).map(|bytes| u16::from_be_bytes(bytes.try_into().unwrap()))
     }
 }
 
 impl FromSourceBytes for u32 {
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized,
     {
-        source
-            .consume_next(4)
-            .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
+        read(4).map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
     }
 }
 
 impl FromSourceBytes for u64 {
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized,
     {
-        source
-            .consume_next(8)
-            .map(|bytes| u64::from_be_bytes(bytes.try_into().unwrap()))
+        read(8).map(|bytes| u64::from_be_bytes(bytes.try_into().unwrap()))
     }
 }
 
 impl<const N: usize, F: FromSourceBytes + Copy + Default> FromSourceBytes for [F; N] {
-    fn decode(source: &mut impl ReadableSource) -> Result<Self>
+    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
     where
         Self: Sized,
     {
         let mut arr = [F::default(); N];
 
         for val in arr.iter_mut() {
-            *val = F::decode(source)?;
+            *val = F::decode(read)?;
         }
 
         Ok(arr)
