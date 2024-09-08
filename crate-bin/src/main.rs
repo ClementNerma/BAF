@@ -18,6 +18,7 @@ use baf::{
     source::{RealFile, WritableSource},
 };
 use clap::Parser;
+use walkdir::WalkDir;
 
 use self::{
     args::Command,
@@ -84,11 +85,7 @@ fn inner_main() -> Result<()> {
             }
         }
 
-        Command::Add {
-            path,
-            item_path,
-            rename_as,
-        } => {
+        Command::Add { path, item_path } => {
             if !item_path.exists() {
                 bail!("No item found at path '{}'", item_path.display());
             }
@@ -114,7 +111,7 @@ fn inner_main() -> Result<()> {
 
             let mut archive = archive.easy();
 
-            add_item_to_archive(&mut archive, &item_path, rename_as, vec![])?;
+            add_item_to_archive(&mut archive, &item_path)?;
 
             archive.flush().context("Failed to close archive")?;
         }
@@ -126,101 +123,97 @@ fn inner_main() -> Result<()> {
 fn add_item_to_archive(
     archive: &mut EasyArchive<impl WritableSource>,
     item_path: &Path,
-    rename_as: Option<String>,
-    append_to_rename_as: Vec<String>,
 ) -> Result<()> {
     if !item_path.exists() {
-        bail!("No item found at path '{}'", item_path.display());
+        bail!("Item at path '{}' does not exist", item_path.display());
     }
 
-    let (item_path_str, item_path_display) = match rename_as.clone() {
-        Some(mut path_str) => {
-            if !append_to_rename_as.is_empty() {
-                for item in &append_to_rename_as {
-                    path_str.push('/');
-                    path_str.push_str(item);
-                }
-            }
+    let canon_path = fs::canonicalize(item_path)
+        .with_context(|| format!("Failed to canonicalize path '{}'", item_path.display()))?;
 
-            (
-                path_str.clone(),
-                format!("'{}' (as '{path_str}')", item_path.display()),
-            )
-        }
+    let mt = canon_path.metadata().with_context(|| {
+        format!(
+            "Failed to get metadata on item at path '{}'",
+            canon_path.display()
+        )
+    })?;
 
-        None => {
-            let path_str = item_path
-                .to_str()
-                .with_context(|| {
-                    format!(
-                        "Cannot add path '{}' to archive as it contains invalid UTF-8 characters",
-                        item_path.display()
-                    )
-                })?
-                .to_owned();
+    fn add_file_to_archive(
+        archive: &mut EasyArchive<impl WritableSource>,
+        canon_path: &Path,
+        path_in_archive: &str,
+    ) -> Result<()> {
+        println!("Adding file '{path_in_archive}'...");
 
-            (path_str.clone(), format!("'{}'", item_path.display()))
-        }
-    };
+        let mtime = get_item_mtime(canon_path)?;
 
-    let item_mtime = item_path.metadata().with_context(|| format!("Failed to get metadata for item '{}'", item_path.display()))?
-        .modified().unwrap_or_else(|err| {
-            eprintln!("WARN: Failed to get modification time for item at path '{}': {err} ; falling back to current time", item_path.display());
-            SystemTime::now()
-        });
-
-    let item_mtime = translate_time_for_archive(item_mtime);
-
-    // Add directory
-    if item_path.is_dir() {
-        println!("Adding directory {item_path_display}...");
+        let content = RealFile::open(canon_path).context("Failed to open file in read mode")?;
 
         archive
-            .create_directory(&item_path_str, item_mtime)
-            .with_context(|| format!("Failed to create directory '{item_path_str}' in archive"))?;
+            .create_or_update_file(path_in_archive, content, mtime)
+            .context("Failed to add file to archive")?;
 
-        let read_dir = fs::read_dir(item_path)
-            .and_then(|results| results.collect::<Result<Vec<_>, _>>())
-            .with_context(|| {
+        Ok(())
+    }
+
+    fn get_item_mtime(path: &Path) -> Result<u64> {
+        let mtime = path
+            .metadata()
+            .context("Failed to get metadata for file")?
+            .modified()
+            .unwrap_or_else(|err| {
+                eprintln!("WARN: Failed to get the file's modification time ({err}) ; falling back to current time");
+                SystemTime::now()
+            });
+
+        Ok(translate_time_for_archive(mtime))
+    }
+
+    if mt.file_type().is_file() {
+        let filename = item_path
+            .file_name()
+            .context("Provided path does not have a file name")?;
+
+        let filename = filename
+            .to_str()
+            .context("Filename contains invalid UTF-8 characters")?;
+
+        add_file_to_archive(archive, &canon_path, filename)
+    } else if mt.file_type().is_dir() {
+        for item in WalkDir::new(&canon_path) {
+            let item = item.context("Failed to read directory")?;
+
+            let path_in_archive = item.path().strip_prefix(&canon_path).unwrap();
+
+            if path_in_archive.as_os_str().is_empty() {
+                continue;
+            }
+
+            let path_in_archive = path_in_archive.to_str().with_context(|| {
                 format!(
-                    "Failed to read content of directory at path '{}'",
-                    item_path.display()
+                    "Path '{}' contains invalid UTF-8 characters",
+                    path_in_archive.display()
                 )
             })?;
 
-        for item in read_dir {
-            let path = item.path();
+            if item.file_type().is_file() {
+                add_file_to_archive(archive, item.path(), path_in_archive)?;
+            } else if item.file_type().is_dir() {
+                println!("Creating directory '{path_in_archive}'...",);
 
-            let filename = path
-                .file_name()
-                .with_context(|| format!("Item at path '{}' does not have a filename", path.display()))?
-                .to_str()
-                .with_context(|| format!("Cannot create path '{}' in archive as it does contain invalid UTF-8 characters", path.display()))?
-                .to_owned();
+                let mtime = get_item_mtime(item.path())?;
 
-            let mut rename_as_append = append_to_rename_as.clone();
-            rename_as_append.push(filename);
-
-            add_item_to_archive(archive, &path, rename_as.clone(), rename_as_append)?;
+                archive.create_directory(path_in_archive, mtime)?;
+            } else {
+                eprintln!(
+                    "WARN: Ignoring unknown item type at path '{}'",
+                    canon_path.display()
+                );
+            }
         }
 
         Ok(())
-    }
-    // Add file
-    else if item_path.is_file() {
-        println!("Adding file {item_path_display}...");
-
-        let content = RealFile::open(item_path)
-            .with_context(|| format!("Failed to open file at path '{}'", item_path.display()))?;
-
-        archive
-            .create_file(&item_path_str, content, item_mtime)
-            .with_context(|| format!("Failed to create file '{item_path_str}' in archive"))?;
-
-        Ok(())
-    }
-    // Otherwise, it's an unsupported file type
-    else {
-        bail!("Unsupported item type at path '{}'", item_path.display());
+    } else {
+        bail!("Unkown item type at path '{}'", canon_path.display());
     }
 }

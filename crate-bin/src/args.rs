@@ -20,8 +20,5 @@ pub enum Command {
 
         #[clap(help = "File or directory to add")]
         item_path: PathBuf,
-
-        #[clap(help = "Add with a specific path", long = "as")]
-        rename_as: Option<String>,
     },
 }

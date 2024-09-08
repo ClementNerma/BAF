@@ -11,11 +11,11 @@ pub struct ItemName(String);
 impl ItemName {
     /// Represent an item name
     pub fn new(name: String) -> Result<Self, NameValidationError> {
-        Self::check_name(&name).map(|()| Self(name))
+        Self::check_validity(&name).map(|()| Self(name))
     }
 
     /// Check if a name is a valid archive item's name
-    pub fn check_name(name: &str) -> Result<(), NameValidationError> {
+    pub fn check_validity(name: &str) -> Result<(), NameValidationError> {
         if name.is_empty() {
             return Err(NameValidationError::NameIsEmpty);
         }
