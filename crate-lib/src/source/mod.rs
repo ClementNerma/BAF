@@ -9,34 +9,49 @@ pub use self::{in_memory::InMemorySource, real_file::RealFile};
 
 use anyhow::Result;
 
-/// A readable source
+/// A source that allows consuming data
 ///
-/// It contains a cursor, which starts at byte 0.
-#[allow(clippy::len_without_is_empty)]
-pub trait ReadableSource {
-    /// Get the cursor's position (offset in bytes)
-    fn position(&mut self) -> Result<u64>;
-
-    /// Set the cursor's position (offset in bytes)
-    fn set_position(&mut self, addr: u64) -> Result<()>;
+/// This trait is used to prevent data-consuming types to move the cursor's position by themselves
+pub trait ConsumableSource {
+    /// Consume the amount of provided bytes after the current position,
+    /// then advance the cursor by the same amount of bytes.
+    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()>;
 
     /// Consume the amount of provided bytes after the current position,
     /// then advance the cursor by the same amount of bytes.
-    fn consume_next(&mut self, bytes: u64) -> Result<Vec<u8>>;
+    fn consume_to_array<const BYTES: usize>(&mut self) -> Result<[u8; BYTES]> {
+        let mut buf = [0; BYTES];
+        self.consume_into_buffer(u64::try_from(BYTES).unwrap(), &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Consume the amount of provided bytes after the current position into a vector,
+    /// then advance the cursor by the same amount of bytes.
+    fn consume_into_vec(&mut self, bytes: u64) -> Result<Vec<u8>> {
+        let mut vec = vec![0; usize::try_from(bytes).unwrap()];
+        self.consume_into_buffer(bytes, &mut vec)?;
+        Ok(vec)
+    }
 
     /// Consume a value that will manipulate the source itself
     fn consume_next_value<F: FromSourceBytes>(&mut self) -> Result<F>
     where
         Self: Sized,
     {
-        let pos = self.position()?;
-        let result = F::decode(&mut |bytes| self.consume_next(bytes));
-
-        // Ensure the cursor didn't go backwards
-        assert!(self.position()? >= pos);
-
-        result
+        F::decode(self)
     }
+}
+
+/// A readable source
+///
+/// It contains a cursor, which starts at byte 0.
+#[allow(clippy::len_without_is_empty)]
+pub trait ReadableSource: ConsumableSource {
+    /// Get the cursor's position (offset in bytes)
+    fn position(&mut self) -> Result<u64>;
+
+    /// Set the cursor's position (offset in bytes)
+    fn set_position(&mut self, addr: u64) -> Result<()>;
 
     /// Get the total length, in bytes
     fn len(&self) -> Result<u64>;
@@ -66,56 +81,58 @@ pub trait FromSourceBytes {
     ///
     /// The provided function allows to try to read the next amount of the provided bytes,
     /// advancing the reader's cursor from the same amount in the process.
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized;
 }
 
 impl FromSourceBytes for u8 {
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized,
     {
-        read(1).map(|bytes| *bytes.first().unwrap())
+        source
+            .consume_to_array::<1>()
+            .map(|bytes| *bytes.first().unwrap())
     }
 }
 
 impl FromSourceBytes for u16 {
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized,
     {
-        read(2).map(|bytes| u16::from_be_bytes(bytes.try_into().unwrap()))
+        source.consume_to_array::<2>().map(u16::from_be_bytes)
     }
 }
 
 impl FromSourceBytes for u32 {
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized,
     {
-        read(4).map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
+        source.consume_to_array::<4>().map(u32::from_be_bytes)
     }
 }
 
 impl FromSourceBytes for u64 {
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized,
     {
-        read(8).map(|bytes| u64::from_be_bytes(bytes.try_into().unwrap()))
+        source.consume_to_array::<8>().map(u64::from_be_bytes)
     }
 }
 
 impl<const N: usize, F: FromSourceBytes + Copy + Default> FromSourceBytes for [F; N] {
-    fn decode(read: &mut impl FnMut(u64) -> Result<Vec<u8>>) -> Result<Self>
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized,
     {
         let mut arr = [F::default(); N];
 
         for val in arr.iter_mut() {
-            *val = F::decode(read)?;
+            *val = F::decode(source)?;
         }
 
         Ok(arr)

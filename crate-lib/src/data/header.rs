@@ -20,7 +20,7 @@ impl Header {
     pub fn decode<S: ReadableSource>(source: &mut S) -> Result<SourceWithHeader<S>> {
         source.set_position(0)?;
 
-        let got_magic_number = source.consume_next(8)?;
+        let got_magic_number = source.consume_to_array::<8>()?;
 
         if got_magic_number != MAGIC_NUMBER {
             bail!("Invalid magic number: got {got_magic_number:X?}, expected {MAGIC_NUMBER:X?}");
@@ -33,7 +33,11 @@ impl Header {
 
         let bytes = HEADER_SIZE - source.position()?;
 
-        if source.consume_next(bytes)?.iter().any(|b| *b != 0) {
+        let mut buf = [0; 256];
+
+        source.consume_into_buffer(bytes, &mut buf)?;
+
+        if buf.iter().any(|b| *b != 0) {
             bail!("Rest of the header is not filled with zeroes");
         }
 

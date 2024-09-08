@@ -59,7 +59,7 @@ impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
 
         let bytes = self
             .source
-            .consume_next(read_len)
+            .consume_into_vec(read_len)
             .map_err(|err| Error::new(ErrorKind::Other, format!("{err:?}")))?;
 
         buf[0..read_len_usize].copy_from_slice(&bytes);

@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{ReadableSource, WritableSource};
+use super::{ConsumableSource, ReadableSource, WritableSource};
 
 /// Representation of a real file (e.g. on-disk)
 ///
@@ -87,6 +87,18 @@ impl RealFile {
     }
 }
 
+impl ConsumableSource for RealFile {
+    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
+        self.reader()?
+            .read_exact(&mut buf[0..usize::try_from(bytes).unwrap()])
+            .with_context(|| format!("Failed to read {bytes} bytes"))?;
+
+        self.position += bytes;
+
+        Ok(())
+    }
+}
+
 impl ReadableSource for RealFile {
     fn position(&mut self) -> Result<u64> {
         Ok(self.position)
@@ -106,18 +118,6 @@ impl ReadableSource for RealFile {
         assert_eq!(self.position, addr);
 
         Ok(())
-    }
-
-    fn consume_next(&mut self, bytes: u64) -> Result<Vec<u8>> {
-        let mut vec = vec![0; usize::try_from(bytes).unwrap()];
-
-        self.reader()?
-            .read_exact(&mut vec)
-            .with_context(|| format!("Failed to read {bytes} bytes"))?;
-
-        self.position += bytes;
-
-        Ok(vec)
     }
 
     fn len(&self) -> Result<u64> {

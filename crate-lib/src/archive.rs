@@ -180,7 +180,7 @@ impl<S: ReadableSource> Archive<S> {
 
         self.source.set_position(file.content_addr)?;
 
-        let bytes = self.source.consume_next(file.content_len)?;
+        let bytes = self.source.consume_into_vec(file.content_len)?;
 
         let mut hash = Sha3_256::new();
         hash.update(&bytes);
@@ -368,11 +368,15 @@ impl<S: WritableSource> Archive<S> {
         let mut written = 0;
 
         while written < len {
-            let data = data.consume_next(4096.min(len - written))?;
+            let mut buf = [0; 4096];
+            let len = 4096.min(len - written);
+            data.consume_into_buffer(len, &mut buf)?;
 
-            self.source.write_all(&data)?;
-            written += u64::try_from(data.len()).unwrap();
-            checksum.update(&data);
+            let data = &buf[0..usize::try_from(len).unwrap()];
+
+            self.source.write_all(data)?;
+            written += len;
+            checksum.update(data);
         }
 
         if growing {

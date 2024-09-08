@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 
-use super::{ReadableSource, WritableSource};
+use super::{ConsumableSource, ReadableSource, WritableSource};
 
 /// An archive reprensentation that's stored exclusively in memory
 ///
@@ -42,18 +42,8 @@ impl Default for InMemorySource {
     }
 }
 
-impl ReadableSource for InMemorySource {
-    fn position(&mut self) -> Result<u64> {
-        Ok(self.position)
-    }
-
-    fn set_position(&mut self, addr: u64) -> Result<()> {
-        assert!(addr <= self.size(), "{addr} > {}", self.size());
-        self.position = addr;
-        Ok(())
-    }
-
-    fn consume_next(&mut self, bytes: u64) -> Result<Vec<u8>> {
+impl ConsumableSource for InMemorySource {
+    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
         if self.position + bytes > self.size() {
             bail!("End of input");
         }
@@ -64,7 +54,21 @@ impl ReadableSource for InMemorySource {
 
         self.position += bytes;
 
-        Ok(slice.to_vec())
+        buf[0..bytes_usize].copy_from_slice(slice);
+
+        Ok(())
+    }
+}
+
+impl ReadableSource for InMemorySource {
+    fn position(&mut self) -> Result<u64> {
+        Ok(self.position)
+    }
+
+    fn set_position(&mut self, addr: u64) -> Result<()> {
+        assert!(addr <= self.size(), "{addr} > {}", self.size());
+        self.position = addr;
+        Ok(())
     }
 
     fn len(&self) -> Result<u64> {
