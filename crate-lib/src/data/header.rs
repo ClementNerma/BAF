@@ -52,7 +52,7 @@ impl Header {
         let mut bytes = vec![];
 
         bytes.extend(MAGIC_NUMBER);
-        bytes.extend(self.version.encode().to_le_bytes());
+        bytes.extend(self.version.encode());
         bytes.extend(vec![0; 256 - bytes.len()]);
 
         assert_eq!(bytes.len(), 256);
@@ -82,10 +82,14 @@ impl ArchiveVersion {
         }
     }
 
-    pub fn encode(&self) -> u32 {
+    pub fn version_number(&self) -> u32 {
         match self {
             ArchiveVersion::One => 1,
         }
+    }
+
+    pub fn encode(&self) -> [u8; 4] {
+        self.version_number().to_le_bytes()
     }
 }
 
