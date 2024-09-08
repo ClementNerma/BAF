@@ -102,7 +102,7 @@ impl FromSourceBytes for u16 {
     where
         Self: Sized,
     {
-        source.consume_to_array::<2>().map(u16::from_be_bytes)
+        source.consume_to_array::<2>().map(u16::from_le_bytes)
     }
 }
 
@@ -111,7 +111,7 @@ impl FromSourceBytes for u32 {
     where
         Self: Sized,
     {
-        source.consume_to_array::<4>().map(u32::from_be_bytes)
+        source.consume_to_array::<4>().map(u32::from_le_bytes)
     }
 }
 
@@ -120,7 +120,7 @@ impl FromSourceBytes for u64 {
     where
         Self: Sized,
     {
-        source.consume_to_array::<8>().map(u64::from_be_bytes)
+        source.consume_to_array::<8>().map(u64::from_le_bytes)
     }
 }
 

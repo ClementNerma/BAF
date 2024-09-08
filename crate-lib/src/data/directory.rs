@@ -70,8 +70,8 @@ impl Directory {
 
         let mut bytes = vec![];
 
-        bytes.extend(id.to_be_bytes());
-        bytes.extend(parent_dir.unwrap_or(0).to_be_bytes());
+        bytes.extend(id.to_le_bytes());
+        bytes.extend(parent_dir.unwrap_or(0).to_le_bytes());
         bytes.extend(name.encode());
         bytes.extend(modif_time.encode());
 

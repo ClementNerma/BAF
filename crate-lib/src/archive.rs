@@ -411,7 +411,7 @@ impl<S: WritableSource> Archive<S> {
         self.source
             .set_position(self.segment_addr(self.file_segments.len() - 1))?;
 
-        self.source.write_all(&new_segment_addr.to_be_bytes())?;
+        self.source.write_all(&new_segment_addr.to_le_bytes())?;
 
         // Update in-memory representation
         self.file_segments.last_mut().unwrap().next_segment_addr = Some(new_segment_addr);

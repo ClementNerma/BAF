@@ -52,7 +52,7 @@ impl Header {
         let mut bytes = vec![];
 
         bytes.extend(MAGIC_NUMBER);
-        bytes.extend(self.version.encode().to_be_bytes());
+        bytes.extend(self.version.encode().to_le_bytes());
         bytes.extend(vec![0; 256 - bytes.len()]);
 
         assert_eq!(bytes.len(), 256);

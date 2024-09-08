@@ -97,9 +97,9 @@ impl FileTableSegment {
 
         let mut bytes = vec![];
 
-        bytes.extend(next_segment_addr.unwrap_or(0).to_be_bytes());
-        bytes.extend(u32::try_from(dirs.len()).unwrap().to_be_bytes());
-        bytes.extend(u32::try_from(files.len()).unwrap().to_be_bytes());
+        bytes.extend(next_segment_addr.unwrap_or(0).to_le_bytes());
+        bytes.extend(u32::try_from(dirs.len()).unwrap().to_le_bytes());
+        bytes.extend(u32::try_from(files.len()).unwrap().to_le_bytes());
 
         for dir in dirs {
             bytes.extend(match dir {

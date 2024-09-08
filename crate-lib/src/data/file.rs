@@ -72,12 +72,12 @@ impl File {
 
         let mut bytes = vec![];
 
-        bytes.extend(id.to_be_bytes());
-        bytes.extend(parent_dir.unwrap_or(0).to_be_bytes());
+        bytes.extend(id.to_le_bytes());
+        bytes.extend(parent_dir.unwrap_or(0).to_le_bytes());
         bytes.extend(name.encode());
         bytes.extend(modif_time.encode());
-        bytes.extend(content_addr.to_be_bytes());
-        bytes.extend(content_len.to_be_bytes());
+        bytes.extend(content_addr.to_le_bytes());
+        bytes.extend(content_len.to_le_bytes());
         bytes.extend(sha3_checksum);
 
         assert_eq!(u64::try_from(bytes.len()).unwrap(), FILE_ENTRY_SIZE);

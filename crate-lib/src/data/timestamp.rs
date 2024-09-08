@@ -21,7 +21,7 @@ impl Timestamp {
     }
 
     pub fn encode(&self) -> [u8; 8] {
-        self.0.to_be_bytes()
+        self.0.to_le_bytes()
     }
 }
 
