@@ -14,6 +14,8 @@ use crate::{
 /// Representation of an abstraction over the base [`Archive`] type
 ///
 /// This type is easier to use, while the [`Archive`] type is tailored for lower-level manipulations
+///
+/// The main difference is that instead of dealing with unique identifiers, this type deals with string paths (just like in a real filesystem)
 pub struct EasyArchive<S: ReadableSource> {
     archive: Archive<S>,
 }
