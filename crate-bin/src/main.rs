@@ -13,8 +13,8 @@ use anyhow::{bail, Context, Result};
 use baf::{
     archive::Archive,
     config::ArchiveConfig,
-    data::file::File,
-    easy::{translate_time_for_archive, EasyArchive},
+    data::{file::File, timestamp::Timestamp},
+    easy::EasyArchive,
     source::{RealFile, WritableSource},
 };
 use clap::Parser;
@@ -156,7 +156,7 @@ fn add_item_to_archive(
         Ok(())
     }
 
-    fn get_item_mtime(path: &Path) -> Result<u64> {
+    fn get_item_mtime(path: &Path) -> Result<Timestamp> {
         let mtime = path
             .metadata()
             .context("Failed to get metadata for file")?
@@ -166,7 +166,7 @@ fn add_item_to_archive(
                 SystemTime::now()
             });
 
-        Ok(translate_time_for_archive(mtime))
+        Ok(Timestamp::from(mtime))
     }
 
     if mt.file_type().is_file() {

@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::{
     archive::{Archive, DirEntry},
-    data::{directory::Directory, file::File, name::ItemName},
+    data::{directory::Directory, file::File, name::ItemName, timestamp::Timestamp},
     source::{ReadableSource, WritableSource},
 };
 
@@ -135,7 +135,7 @@ impl<S: WritableSource> EasyArchive<S> {
                         curr_id,
                         ItemName::new(segment.to_owned())
                             .map_err(|err| anyhow!("Component '{segment}' is invalid: {err}"))?,
-                        translate_time_for_archive(SystemTime::now()),
+                        Timestamp::from(SystemTime::now()),
                     )?;
 
                     self.archive.get_dir(dir_id).unwrap().clone()
@@ -150,7 +150,7 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 
     /// Create a directory
-    pub fn create_directory(&mut self, path: &str, modif_time: u64) -> Result<u64> {
+    pub fn create_directory(&mut self, path: &str, modif_time: Timestamp) -> Result<u64> {
         let mut path = Self::split_path(path);
 
         let filename = path.pop().context("Path cannot be empty")?;
@@ -174,7 +174,7 @@ impl<S: WritableSource> EasyArchive<S> {
         &mut self,
         path: &str,
         content: impl ReadableSource,
-        modif_time: u64,
+        modif_time: Timestamp,
     ) -> Result<()> {
         if let Some(path) = self.get_file(path) {
             return self
@@ -209,7 +209,7 @@ impl<S: WritableSource> EasyArchive<S> {
         &mut self,
         path: &str,
         content: impl ReadableSource,
-        modif_time: u64,
+        modif_time: Timestamp,
     ) -> Result<()> {
         if self.get_file(path).is_some() {
             bail!("File already exists in archive at path '{path}'");
@@ -223,7 +223,7 @@ impl<S: WritableSource> EasyArchive<S> {
         &mut self,
         path: &str,
         content: impl ReadableSource,
-        modif_time: u64,
+        modif_time: Timestamp,
     ) -> Result<()> {
         if self.get_file(path).is_none() {
             bail!("File not found in archive at path '{path}'");
@@ -256,11 +256,4 @@ impl<S: WritableSource> EasyArchive<S> {
     pub fn flush(&mut self) -> Result<()> {
         self.archive.flush()
     }
-}
-
-/// Translate a [`SystemTime`] into a timestamp for an archive
-pub fn translate_time_for_archive(time: SystemTime) -> u64 {
-    time.duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
 }

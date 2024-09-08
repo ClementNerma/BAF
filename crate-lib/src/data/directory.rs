@@ -5,6 +5,7 @@ use crate::{ensure_only_one_version, source::ReadableSource};
 use super::{
     header::SourceWithHeader,
     name::{ItemName, NameDecodingError},
+    timestamp::Timestamp,
 };
 
 pub static DIRECTORY_ENTRY_SIZE: u64 = 280;
@@ -23,7 +24,7 @@ pub struct Directory {
     pub name: ItemName,
 
     /// Modification time, in seconds since Unix' Epoch
-    pub modif_time: u64,
+    pub modif_time: Timestamp,
 }
 
 impl Directory {
@@ -72,7 +73,7 @@ impl Directory {
         bytes.extend(id.to_be_bytes());
         bytes.extend(parent_dir.unwrap_or(0).to_be_bytes());
         bytes.extend(name.encode());
-        bytes.extend(modif_time.to_be_bytes());
+        bytes.extend(modif_time.encode());
 
         assert_eq!(u64::try_from(bytes.len()).unwrap(), DIRECTORY_ENTRY_SIZE);
 

@@ -15,6 +15,7 @@ use crate::{
         ft_segment::FileTableSegment,
         header::{Header, HEADER_SIZE},
         name::ItemName,
+        timestamp::Timestamp,
     },
     diagnostic::Diagnostic,
     easy::EasyArchive,
@@ -500,7 +501,7 @@ impl<S: WritableSource> Archive<S> {
         &mut self,
         parent_dir: Option<u64>,
         name: ItemName,
-        modif_time: u64,
+        modif_time: Timestamp,
     ) -> Result<u64> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
@@ -559,7 +560,7 @@ impl<S: WritableSource> Archive<S> {
         &mut self,
         parent_dir: Option<u64>,
         name: ItemName,
-        modif_time: u64,
+        modif_time: Timestamp,
         content: impl ReadableSource,
     ) -> Result<u64> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
@@ -631,7 +632,7 @@ impl<S: WritableSource> Archive<S> {
     pub fn replace_file_content(
         &mut self,
         id: u64,
-        new_modif_time: u64,
+        new_modif_time: Timestamp,
         new_content: impl ReadableSource,
     ) -> Result<()> {
         let SegmentEntry {

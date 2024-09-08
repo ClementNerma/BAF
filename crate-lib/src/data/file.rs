@@ -5,6 +5,7 @@ use crate::{ensure_only_one_version, source::ReadableSource};
 use super::{
     header::SourceWithHeader,
     name::{ItemName, NameDecodingError},
+    timestamp::Timestamp,
 };
 
 pub static FILE_ENTRY_SIZE: u64 = 328;
@@ -15,7 +16,7 @@ pub struct File {
     pub id: u64,
     pub parent_dir: Option<u64>,
     pub name: ItemName,
-    pub modif_time: u64,
+    pub modif_time: Timestamp,
     pub content_addr: u64,
     pub content_len: u64,
     pub sha3_checksum: [u8; 32],
@@ -74,7 +75,7 @@ impl File {
         bytes.extend(id.to_be_bytes());
         bytes.extend(parent_dir.unwrap_or(0).to_be_bytes());
         bytes.extend(name.encode());
-        bytes.extend(modif_time.to_be_bytes());
+        bytes.extend(modif_time.encode());
         bytes.extend(content_addr.to_be_bytes());
         bytes.extend(content_len.to_be_bytes());
         bytes.extend(sha3_checksum);

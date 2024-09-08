@@ -8,7 +8,7 @@ use crate::{
     archive::{Archive, DirEntry},
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
-    data::name::ItemName,
+    data::{name::ItemName, timestamp::Timestamp},
     source::{InMemorySource, RealFile, WritableSource},
 };
 
@@ -31,14 +31,18 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     let mut archive = Archive::create(source, ArchiveConfig::default()).unwrap();
 
     let directory_id = archive
-        .create_directory(None, ItemName::new("dir".to_owned()).unwrap(), 0)
+        .create_directory(
+            None,
+            ItemName::new("dir".to_owned()).unwrap(),
+            Timestamp::now(),
+        )
         .unwrap();
 
     let file_id = archive
         .create_file(
             Some(directory_id),
             ItemName::new("file".to_owned()).unwrap(),
-            0,
+            Timestamp::now(),
             InMemorySource::from_data(FILE_CONTENT.to_vec()),
         )
         .unwrap();
@@ -58,7 +62,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
         let file = archive.create_file(
             None,
             ItemName::new("should be removed".to_owned()).unwrap(),
-            0,
+            Timestamp::now(),
             InMemorySource::new(),
         )?;
         archive.remove_file(file)?;
@@ -66,7 +70,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
         let dir = archive.create_directory(
             None,
             ItemName::new("should be removed".to_owned()).unwrap(),
-            0,
+            Timestamp::now(),
         )?;
         archive.remove_directory(dir)?;
     }
@@ -75,13 +79,13 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
         let dir = archive.create_directory(
             None,
             ItemName::new("should be removed".to_owned()).unwrap(),
-            0,
+            Timestamp::now(),
         )?;
 
         archive.create_file(
             Some(dir),
             ItemName::new("should be removed".to_owned()).unwrap(),
-            0,
+            Timestamp::now(),
             InMemorySource::new(),
         )?;
 
