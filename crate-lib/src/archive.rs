@@ -23,7 +23,7 @@ use crate::{
 };
 
 // TODO: check item names during decoding
-// TODO: check if parent dirs do exist during decoding
+// TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
 
 /// Representation of an archive

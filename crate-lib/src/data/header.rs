@@ -16,6 +16,7 @@ pub struct Header {
 }
 
 impl Header {
+    /// Decode the header of an archive from a readable source
     pub fn decode<S: ReadableSource>(source: &mut S) -> Result<SourceWithHeader<S>> {
         source.set_position(0)?;
 
@@ -84,7 +85,13 @@ impl ArchiveVersion {
     }
 }
 
+/// A mutable reference to a readable source along with the read archive's header
+///
+/// The readable source's cursor will have advanced by the header's length
 pub struct SourceWithHeader<'s, S: ReadableSource> {
+    /// Source the header was read from
     pub source: &'s mut S,
+
+    /// Decoded and validated header
     pub header: Header,
 }
