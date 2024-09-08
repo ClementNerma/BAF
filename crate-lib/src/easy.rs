@@ -3,11 +3,11 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 use crate::{
     archive::{Archive, DirEntry},
-    data::{directory::Directory, file::File},
+    data::{directory::Directory, file::File, name::ItemName},
     source::{ReadableSource, WritableSource},
 };
 
@@ -133,7 +133,8 @@ impl<S: WritableSource> EasyArchive<S> {
                 None => {
                     let dir_id = self.archive.create_directory(
                         curr_id,
-                        segment.to_owned(),
+                        ItemName::new(segment.to_owned())
+                            .map_err(|err| anyhow!("Component '{segment}' is invalid: {err}"))?,
                         translate_time_for_archive(SystemTime::now()),
                     )?;
 
@@ -153,6 +154,9 @@ impl<S: WritableSource> EasyArchive<S> {
         let mut path = Self::split_path(path);
 
         let filename = path.pop().context("Path cannot be empty")?;
+
+        let filename = ItemName::new(filename)
+            .map_err(|err| anyhow!("Provided filename is invalid: {err}"))?;
 
         let parent_dir = if path.is_empty() {
             None
@@ -181,6 +185,9 @@ impl<S: WritableSource> EasyArchive<S> {
         let mut path = Self::split_path(path);
 
         let filename = path.pop().context("Path cannot be empty")?;
+
+        let filename = ItemName::new(filename)
+            .map_err(|err| anyhow!("Provided filename is invalid: {err}"))?;
 
         let parent_dir = if path.is_empty() {
             None

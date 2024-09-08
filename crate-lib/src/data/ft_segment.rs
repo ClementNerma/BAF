@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{data::utils::none_if_zero, ensure_only_one_version, source::ReadableSource};
+use crate::{diagnostic::Diagnostic, ensure_only_one_version, source::ReadableSource};
 
 use super::{
     directory::{Directory, DIRECTORY_ENTRY_SIZE},
@@ -22,7 +22,9 @@ pub struct FileTableSegment {
 
 impl FileTableSegment {
     /// Decode a raw file table segment
-    pub fn decode(input: &mut SourceWithHeader<impl ReadableSource>) -> Result<Self> {
+    pub fn decode(
+        input: &mut SourceWithHeader<impl ReadableSource>,
+    ) -> Result<(Self, Vec<Diagnostic>)> {
         // Only there to ensure at compile time there is only one possible version
         ensure_only_one_version!(input.header.version);
 
@@ -31,17 +33,58 @@ impl FileTableSegment {
         let dirs_count = input.source.consume_next_value::<u32>()?;
         let files_count = input.source.consume_next_value::<u32>()?;
 
-        Ok(Self {
-            next_segment_addr: none_if_zero(next_segment_addr),
+        let mut diagnostics = Vec::new();
 
-            dirs: (0..dirs_count)
-                .map(|_| Directory::decode(input))
-                .collect::<Result<Vec<_>, _>>()?,
+        let dirs = (0..dirs_count)
+            .map(|_| {
+                input.source.position().and_then(|ft_entry_addr| {
+                    Directory::consume_from_reader(input).map(|entry| {
+                        entry.and_then(|dir| {
+                            dir.map_err(|err| {
+                                diagnostics.push(Diagnostic::InvalidItemName {
+                                    is_dir: true,
+                                    ft_entry_addr,
+                                    error: err,
+                                });
+                            })
+                            .ok()
+                        })
+                    })
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-            files: (0..files_count)
-                .map(|_| File::decode(input))
-                .collect::<Result<Vec<_>, _>>()?,
-        })
+        let files = (0..files_count)
+            .map(|_| {
+                input.source.position().and_then(|ft_entry_addr| {
+                    File::consume_from_reader(input).map(|entry| {
+                        entry.and_then(|file| {
+                            file.map_err(|err| {
+                                diagnostics.push(Diagnostic::InvalidItemName {
+                                    is_dir: false,
+                                    ft_entry_addr,
+                                    error: err,
+                                });
+                            })
+                            .ok()
+                        })
+                    })
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok((
+            Self {
+                next_segment_addr: match next_segment_addr {
+                    0 => None,
+                    _ => Some(next_segment_addr),
+                },
+
+                dirs,
+                files,
+            },
+            diagnostics,
+        ))
     }
 
     /// Encode a raw file segment
@@ -99,10 +142,10 @@ impl FileTableSegment {
     pub fn consume_next_segment(
         &self,
         input: &mut SourceWithHeader<impl ReadableSource>,
-    ) -> Option<Result<(u64, Self)>> {
+    ) -> Option<Result<(u64, Self, Vec<Diagnostic>)>> {
         self.next_segment_addr.map(|addr| {
             input.source.set_position(addr)?;
-            Self::decode(input).map(|segment| (addr, segment))
+            Self::decode(input).map(|(segment, diags)| (addr, segment, diags))
         })
     }
 

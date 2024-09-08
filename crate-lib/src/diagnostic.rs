@@ -1,19 +1,22 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Deref};
+
+use crate::data::name::{ItemName, NameDecodingError};
 
 /// Diagnostic emitted while checking an archive's correctness
 pub enum Diagnostic {
     /// A directory takes a name that's already used
-    DirTakesExistingName {
+    ItemHasDuplicateName {
+        is_dir: bool,
+        item_id: u64,
         parent_dir_id: Option<u64>,
-        dir_id: u64,
-        name: String,
+        name: ItemName,
     },
 
-    /// A file takes a name that's already use
-    FileTakesExistingName {
-        parent_dir_id: Option<u64>,
-        file_id: u64,
-        name: String,
+    /// Item has invalid name
+    InvalidItemName {
+        is_dir: bool,
+        ft_entry_addr: u64,
+        error: NameDecodingError,
     },
 }
 
@@ -21,17 +24,18 @@ impl Diagnostic {
     /// Get the severity of a given diagnostic
     pub fn severity(&self) -> Severity {
         match self {
-            Diagnostic::DirTakesExistingName {
+            Diagnostic::ItemHasDuplicateName {
                 parent_dir_id: _,
-                dir_id: _,
+                is_dir: _,
+                item_id: _,
                 name: _,
             } => Severity::Medium,
 
-            Diagnostic::FileTakesExistingName {
-                parent_dir_id: _,
-                file_id: _,
-                name: _,
-            } => Severity::Medium,
+            Diagnostic::InvalidItemName {
+                is_dir: _,
+                ft_entry_addr: _,
+                error: _,
+            } => Severity::High,
         }
     }
 }
@@ -39,36 +43,35 @@ impl Diagnostic {
 impl Display for Diagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Diagnostic::DirTakesExistingName {
+            Diagnostic::ItemHasDuplicateName {
                 parent_dir_id,
-                dir_id,
+                is_dir,
+                item_id,
                 name,
             } => {
                 write!(
                     f,
-                    "Directory with ID {dir_id} is using a duplicate name '{name}' in ",
-                )?;
-
-                match parent_dir_id {
-                    Some(parent_dir_id) => write!(f, "parent directory with ID {parent_dir_id}"),
-                    None => write!(f, "root directory"),
-                }
+                    "{} with ID {item_id} is using a duplicate name '{}' in {}",
+                    if *is_dir { "Directory" } else { "File" },
+                    name.deref(),
+                    match parent_dir_id {
+                        Some(id) => format!("parent directory with ID {id}"),
+                        None => "root directory".to_owned(),
+                    }
+                )
             }
 
-            Diagnostic::FileTakesExistingName {
-                parent_dir_id,
-                file_id,
-                name,
+            Diagnostic::InvalidItemName {
+                is_dir,
+                ft_entry_addr,
+                error,
             } => {
                 write!(
                     f,
-                    "File with ID {file_id} is using a duplicate name '{name}' in ",
-                )?;
-
-                match parent_dir_id {
-                    Some(parent_dir_id) => write!(f, "parent directory with ID {parent_dir_id}"),
-                    None => write!(f, "root directory"),
-                }
+                    "File table entry at address {ft_entry_addr} represents {} with an invalid name: {}",
+                    if *is_dir { "directory" } else { "file" },
+                    error.cause
+                )
             }
         }
     }

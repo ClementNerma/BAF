@@ -2,10 +2,10 @@
 //!
 //! See [`file::RealFile`] and [`in_memory::InMemorySource`]
 
-mod file;
 mod in_memory;
+mod real_file;
 
-pub use self::{file::RealFile, in_memory::InMemorySource};
+pub use self::{in_memory::InMemorySource, real_file::RealFile};
 
 use anyhow::Result;
 

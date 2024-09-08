@@ -78,7 +78,7 @@ fn inner_main() -> Result<()> {
 
                     println!(
                         "[File] {} ({content_len} bytes)",
-                        path.join(&name).display()
+                        path.join(&*name).display()
                     );
                 }
             }

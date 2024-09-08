@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{io::Read, ops::Deref};
 
 use anyhow::{Context, Result};
 
@@ -8,6 +8,7 @@ use crate::{
     archive::{Archive, DirEntry},
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
+    data::name::ItemName,
     source::{InMemorySource, RealFile, WritableSource},
 };
 
@@ -29,44 +30,57 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     // Create archive
     let mut archive = Archive::create(source, ArchiveConfig::default()).unwrap();
 
-    let directory_id = archive.create_directory(None, "dir".to_owned(), 0).unwrap();
+    let directory_id = archive
+        .create_directory(None, ItemName::new("dir".to_owned()).unwrap(), 0)
+        .unwrap();
 
     let file_id = archive
         .create_file(
             Some(directory_id),
-            "file".to_owned(),
+            ItemName::new("file".to_owned()).unwrap(),
             0,
             InMemorySource::from_data(FILE_CONTENT.to_vec()),
         )
         .unwrap();
 
     archive
-        .rename_directory(directory_id, "dir_renamed".to_owned())
+        .rename_directory(
+            directory_id,
+            ItemName::new("dir_renamed".to_owned()).unwrap(),
+        )
         .unwrap();
 
     archive
-        .rename_file(file_id, "file_renamed".to_owned())
+        .rename_file(file_id, ItemName::new("file_renamed".to_owned()).unwrap())
         .unwrap();
 
     {
         let file = archive.create_file(
             None,
-            "should be removed".to_owned(),
+            ItemName::new("should be removed".to_owned()).unwrap(),
             0,
             InMemorySource::new(),
         )?;
         archive.remove_file(file)?;
 
-        let dir = archive.create_directory(None, "should be removed".to_owned(), 0)?;
+        let dir = archive.create_directory(
+            None,
+            ItemName::new("should be removed".to_owned()).unwrap(),
+            0,
+        )?;
         archive.remove_directory(dir)?;
     }
 
     {
-        let dir = archive.create_directory(None, "should be removed".to_owned(), 0)?;
+        let dir = archive.create_directory(
+            None,
+            ItemName::new("should be removed".to_owned()).unwrap(),
+            0,
+        )?;
 
         archive.create_file(
             Some(dir),
-            "should be removed".to_owned(),
+            ItemName::new("should be removed".to_owned()).unwrap(),
             0,
             InMemorySource::new(),
         )?;
@@ -80,19 +94,19 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     let (mut archive, _) = Archive::open(source, ArchiveConfig::default()).unwrap();
 
     assert_eq!(archive.dirs().count(), 1);
-    assert_eq!(archive.dirs().next().unwrap().name, "dir_renamed");
+    assert_eq!(archive.dirs().next().unwrap().name.deref(), "dir_renamed");
 
     assert_eq!(archive.files().count(), 1);
-    assert_eq!(archive.files().next().unwrap().name, "file_renamed");
+    assert_eq!(archive.files().next().unwrap().name.deref(), "file_renamed");
 
     assert_eq!(archive.read_dir(None).unwrap().count(), 1);
     assert!(
-        matches!(archive.read_dir(None).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name == "dir_renamed")
+        matches!(archive.read_dir(None).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name.deref() == "dir_renamed")
     );
 
     assert_eq!(archive.read_dir(Some(1)).unwrap().count(), 1);
     assert!(
-        matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), DirEntry::File(file) if file.name == "file_renamed")
+        matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
     assert_eq!(archive.get_file_content(2).unwrap(), FILE_CONTENT);

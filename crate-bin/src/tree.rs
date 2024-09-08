@@ -28,7 +28,7 @@ impl Tree {
                 .filter(|dir| dir.parent_dir == dir_id)
                 .map(|dir| {
                     let mut path = path.clone();
-                    path.push((dir.id, dir.name.clone()));
+                    path.push((dir.id, dir.name.clone().into_string()));
 
                     (Directory::clone(dir), Self::_new(path, dirs, files))
                 })

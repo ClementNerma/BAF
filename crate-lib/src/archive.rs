@@ -14,7 +14,7 @@ use crate::{
         file::{File, FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY},
         ft_segment::FileTableSegment,
         header::{Header, HEADER_SIZE},
-        utils::encode_name,
+        name::ItemName,
     },
     diagnostic::Diagnostic,
     easy::EasyArchive,
@@ -36,7 +36,7 @@ pub struct Archive<S: ReadableSource> {
     file_segments: Vec<FileTableSegment>,
     dirs: HashMap<u64, Directory>,
     files: HashMap<u64, File>,
-    names_in_dirs: HashMap<Option<u64>, HashSet<String>>,
+    names_in_dirs: HashMap<Option<u64>, HashSet<ItemName>>,
     coverage: Coverage,
 }
 
@@ -54,14 +54,18 @@ impl<S: ReadableSource> Archive<S> {
 
         let mut file_segments = vec![];
         let mut file_segments_addr = vec![HEADER_SIZE];
-        let mut prev_segment = FileTableSegment::decode(&mut source_with_header)?;
+        let (mut prev_segment, new_diags) = FileTableSegment::decode(&mut source_with_header)?;
+
+        diags.extend(new_diags);
 
         while let Some(next_segment) = prev_segment.consume_next_segment(&mut source_with_header) {
             file_segments.push(prev_segment);
 
-            let (segment_addr, segment) = next_segment?;
+            let (segment_addr, segment, new_diags) = next_segment?;
             file_segments_addr.push(segment_addr);
             prev_segment = segment;
+
+            diags.extend(new_diags);
         }
 
         file_segments.push(prev_segment);
@@ -263,7 +267,7 @@ impl<S: ReadableSource> Archive<S> {
     fn compute_names_in_dirs<'a>(
         file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
         diags: &mut Vec<Diagnostic>,
-    ) -> HashMap<Option<u64>, HashSet<String>> {
+    ) -> HashMap<Option<u64>, HashSet<ItemName>> {
         let mut names_in_dirs = HashMap::from([(None, HashSet::new())]);
 
         for segment in file_segments {
@@ -273,9 +277,10 @@ impl<S: ReadableSource> Archive<S> {
                     .or_default()
                     .insert(dir.name.clone())
                 {
-                    diags.push(Diagnostic::DirTakesExistingName {
+                    diags.push(Diagnostic::ItemHasDuplicateName {
+                        is_dir: true,
+                        item_id: dir.id,
                         parent_dir_id: dir.parent_dir,
-                        dir_id: dir.id,
                         name: dir.name.clone(),
                     });
                 }
@@ -289,9 +294,10 @@ impl<S: ReadableSource> Archive<S> {
                     .or_default()
                     .insert(file.name.clone())
                 {
-                    diags.push(Diagnostic::FileTakesExistingName {
+                    diags.push(Diagnostic::ItemHasDuplicateName {
+                        is_dir: false,
+                        item_id: file.id,
                         parent_dir_id: file.parent_dir,
-                        file_id: file.id,
                         name: file.name.clone(),
                     });
                 }
@@ -467,30 +473,6 @@ impl<S: WritableSource> Archive<S> {
         }
     }
 
-    fn ensure_name_correctness(&self, name: &str) -> Result<()> {
-        if name.is_empty() {
-            bail!("Name cannot be empty");
-        }
-
-        if name.len() > 255 {
-            bail!("Name cannot exceed 255 bytes");
-        }
-
-        if name.contains('/') {
-            bail!("Name cannot contain slashes (/)")
-        }
-
-        if name.contains('\\') {
-            bail!("Name cannot contain backslashes (\\)");
-        }
-
-        if name.contains('\r') || name.contains('\n') {
-            bail!("Name cannot contain newline symbols");
-        }
-
-        Ok(())
-    }
-
     fn ensure_no_duplicate_name(&self, name: &str, parent_dir: Option<u64>) -> Result<()> {
         match self.names_in_dirs.get(&parent_dir) {
             Some(names_in_parent_dir) => {
@@ -513,10 +495,9 @@ impl<S: WritableSource> Archive<S> {
     pub fn create_directory(
         &mut self,
         parent_dir: Option<u64>,
-        name: String,
+        name: ItemName,
         modif_time: u64,
     ) -> Result<u64> {
-        self.ensure_name_correctness(&name)?;
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         let SegmentEntry {
@@ -573,17 +554,19 @@ impl<S: WritableSource> Archive<S> {
     pub fn create_file(
         &mut self,
         parent_dir: Option<u64>,
-        name: String,
+        name: ItemName,
         modif_time: u64,
         content: impl ReadableSource,
     ) -> Result<u64> {
-        self.ensure_name_correctness(&name)?;
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         match self.names_in_dirs.get(&parent_dir) {
             Some(names_in_parent_dir) => {
                 if names_in_parent_dir.contains(&name) {
-                    bail!("File name '{name}' is already used in parent directory with ID {parent_dir:?}");
+                    bail!(
+                        "File name '{}' is already used in parent directory with ID {parent_dir:?}",
+                        *name
+                    );
                 }
             }
 
@@ -690,7 +673,7 @@ impl<S: WritableSource> Archive<S> {
     }
 
     /// Rename a directory
-    pub fn rename_directory(&mut self, id: u64, new_name: String) -> Result<()> {
+    pub fn rename_directory(&mut self, id: u64, new_name: ItemName) -> Result<()> {
         let SegmentEntry {
             segment_index,
             entry_index,
@@ -699,13 +682,12 @@ impl<S: WritableSource> Archive<S> {
 
         let dir = self.dirs.get(&id).unwrap().clone();
 
-        self.ensure_name_correctness(&new_name)?;
         self.ensure_no_duplicate_name(&new_name, dir.parent_dir)?;
 
         self.source
             .set_position(entry_addr + DIRECTORY_NAME_OFFSET_IN_ENTRY)?;
 
-        self.source.write_all(&encode_name(&new_name)?)?;
+        self.source.write_all(&new_name.encode())?;
 
         self.file_segments[segment_index].dirs[entry_index]
             .as_mut()
@@ -723,7 +705,7 @@ impl<S: WritableSource> Archive<S> {
     }
 
     /// Rename a file
-    pub fn rename_file(&mut self, id: u64, new_name: String) -> Result<()> {
+    pub fn rename_file(&mut self, id: u64, new_name: ItemName) -> Result<()> {
         let SegmentEntry {
             segment_index,
             entry_index,
@@ -732,13 +714,12 @@ impl<S: WritableSource> Archive<S> {
 
         let file = self.files.get(&id).unwrap().clone();
 
-        self.ensure_name_correctness(&new_name)?;
         self.ensure_no_duplicate_name(&new_name, file.parent_dir)?;
 
         self.source
             .set_position(entry_addr + FILE_NAME_OFFSET_IN_ENTRY)?;
 
-        self.source.write_all(&encode_name(&new_name)?)?;
+        self.source.write_all(&new_name.encode())?;
 
         self.file_segments[segment_index].files[entry_index]
             .as_mut()
