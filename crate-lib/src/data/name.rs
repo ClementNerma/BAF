@@ -24,6 +24,12 @@ impl ItemName {
             return Err(NameValidationError::NameIsTooLong);
         }
 
+        for reserved in [".", ".."] {
+            if name == reserved {
+                return Err(NameValidationError::ForbiddenName(reserved));
+            }
+        }
+
         for char in ['/', '\\', '\n', '\r', '\0'] {
             if name.contains(char) {
                 return Err(NameValidationError::ForbiddenChar(char));
@@ -132,6 +138,9 @@ pub enum NameValidationError {
 
     /// A forbidden character was found in the name
     ForbiddenChar(char),
+
+    /// This name is reserved
+    ForbiddenName(&'static str),
 }
 
 impl Display for NameDecodingErrorReason {
@@ -149,6 +158,7 @@ impl Display for NameValidationError {
             Self::NameIsEmpty => write!(f, "name is empty"),
             Self::NameIsTooLong => write!(f, "name contains more than 255 bytes"),
             Self::ForbiddenChar(c) => write!(f, "name contains invalid character {c:?}"),
+            Self::ForbiddenName(name) => write!(f, "name is reserved: '{name}'"),
         }
     }
 }
