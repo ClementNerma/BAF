@@ -23,7 +23,6 @@ use crate::{
     source::{InMemorySource, ReadableSource, RealFile, WritableSource},
 };
 
-// TODO: check item names during decoding
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
 
@@ -160,12 +159,14 @@ impl<S: ReadableSource> Archive<S> {
             }
         }
 
+        // TODO: optimize to not require a filter over ALL directories
         let dirs = self
             .dirs
             .values()
             .filter(move |dir| dir.parent_dir == id)
             .map(DirEntry::Directory);
 
+        // TODO: same here
         let files = self
             .files
             .values()
@@ -424,6 +425,7 @@ impl<S: WritableSource> Archive<S> {
         let free_entry_addr =
             match item_type {
                 ItemType::Directory => {
+                    // TODO: reverse search as it's more likely free entries are the end
                     self.file_segments
                         .iter()
                         .enumerate()
@@ -441,6 +443,7 @@ impl<S: WritableSource> Archive<S> {
                 }
 
                 ItemType::File => {
+                    // TODO: same thing here
                     self.file_segments
                         .iter()
                         .enumerate()

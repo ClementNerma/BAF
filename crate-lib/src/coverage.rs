@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{btree_set, BTreeSet};
 
 // TODO: remove segments when empty?
 // TODO: shrink archive when needed?
@@ -59,6 +59,7 @@ impl Coverage {
     }
 
     /// Find the smallest segment with at least the provided capacity
+    /// TODO: find a way to make this faster as this has O(n) complexity
     pub fn find_free_zone_for(&self, capacity: u64) -> Option<Segment> {
         self.find_free_zones()
             .filter(|zone| zone.len >= capacity)
@@ -95,13 +96,20 @@ impl PartialOrd for Segment {
 
 /// Iterator over a list of free segments
 pub struct FreeSegmentsIter<'a> {
-    covering: &'a Coverage,
-    step: usize,
+    coverage: &'a Coverage,
+    segments_iter: btree_set::Iter<'a, Segment>,
+    prev_end: u64,
+    yielded_last: bool,
 }
 
 impl<'a> FreeSegmentsIter<'a> {
-    fn new(covering: &'a Coverage) -> Self {
-        Self { covering, step: 0 }
+    fn new(coverage: &'a Coverage) -> Self {
+        Self {
+            coverage,
+            segments_iter: coverage.segments.iter(),
+            prev_end: 0,
+            yielded_last: false,
+        }
     }
 }
 
@@ -109,63 +117,41 @@ impl<'a> Iterator for FreeSegmentsIter<'a> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.step == 0 {
-            self.step += 1;
+        if self.yielded_last {
+            return None;
+        }
 
-            match self.covering.segments.first() {
-                Some(first) => {
-                    if first.start > 0 {
-                        Some(Segment {
-                            start: 0,
-                            len: first.start,
-                        })
-                    } else {
-                        self.next()
-                    }
+        let next_segment = self.segments_iter.next();
+
+        match next_segment {
+            Some(segment) => {
+                if segment.start == self.prev_end {
+                    self.prev_end += segment.len;
+                    return self.next();
                 }
 
-                None => {
-                    if self.covering.len > 0 {
-                        Some(Segment {
-                            start: 0,
-                            len: self.covering.len,
-                        })
-                    } else {
-                        None
-                    }
-                }
-            }
-        } else if self.step == self.covering.segments.len() {
-            self.step += 1;
+                assert!(segment.start > self.prev_end);
 
-            let last = self.covering.segments.last().unwrap();
-            let free_from = last.start + last.len;
+                let prev_end = self.prev_end;
+                self.prev_end = segment.start + segment.len;
 
-            if free_from < self.covering.len {
-                Some(Segment {
-                    start: free_from,
-                    len: self.covering.len - free_from,
-                })
-            } else {
-                None
-            }
-        } else if self.step == self.covering.segments.len() + 1 {
-            None
-        } else {
-            self.step += 1;
-
-            let prev = self.covering.segments.iter().nth(self.step - 2).unwrap();
-            let curr = self.covering.segments.iter().nth(self.step - 1).unwrap();
-
-            let prev_end = prev.start + prev.len;
-
-            if prev_end < curr.start {
                 Some(Segment {
                     start: prev_end,
-                    len: curr.start - prev_end,
+                    len: segment.start - prev_end,
                 })
-            } else {
-                self.next()
+            }
+
+            None => {
+                self.yielded_last = true;
+
+                if self.prev_end < self.coverage.len {
+                    Some(Segment {
+                        start: self.prev_end,
+                        len: self.coverage.len - self.prev_end,
+                    })
+                } else {
+                    None
+                }
             }
         }
     }
