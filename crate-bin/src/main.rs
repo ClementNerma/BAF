@@ -85,9 +85,11 @@ fn inner_main() -> Result<()> {
             }
         }
 
-        Command::Add { path, item_path } => {
-            if !item_path.exists() {
-                bail!("No item found at path '{}'", item_path.display());
+        Command::Add { path, items_path } => {
+            for item_path in &items_path {
+                if !item_path.exists() {
+                    bail!("No item found at path '{}'", item_path.display());
+                }
             }
 
             let config = ArchiveConfig::default();
@@ -111,7 +113,9 @@ fn inner_main() -> Result<()> {
 
             let mut archive = archive.easy();
 
-            add_item_to_archive(&mut archive, &item_path)?;
+            for item_path in &items_path {
+                add_item_to_archive(&mut archive, item_path)?;
+            }
 
             archive.flush().context("Failed to close archive")?;
         }

@@ -18,7 +18,7 @@ pub enum Command {
         #[clap(help = "Path to the archive")]
         path: PathBuf,
 
-        #[clap(help = "File or directory to add")]
-        item_path: PathBuf,
+        #[clap(help = "Items to add (files or directories)")]
+        items_path: Vec<PathBuf>,
     },
 }
