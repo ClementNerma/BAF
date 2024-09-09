@@ -488,7 +488,11 @@ impl<S: WritableSource> Archive<S> {
                     Ok(())
                 } else {
                     bail!(
-                        "Name '{name}' is already used in parent directory with ID {parent_dir:?}"
+                        "Name '{name}' is already used in {}",
+                        match parent_dir {
+                            Some(id) => format!("parent directory with ID {id}"),
+                            None => "root directory".to_owned(),
+                        }
                     );
                 }
             }
