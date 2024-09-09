@@ -40,6 +40,12 @@ impl PathInArchive {
         Ok(Self(out))
     }
 
+    /// Create a path from a suite of components
+    /// TODO: unnecessarily allocates
+    pub fn from_components(components: &[&str]) -> Result<Self> {
+        Self::new(&components.join("/"))
+    }
+
     /// Create an empty path
     pub fn empty() -> Self {
         Self(vec![])
