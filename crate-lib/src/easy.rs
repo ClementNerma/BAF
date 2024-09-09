@@ -1,14 +1,11 @@
-use std::{
-    path::{Component, Path},
-    time::SystemTime,
-};
+use std::{path::Path, time::SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::{
     archive::{Archive, DirEntry},
     config::ArchiveConfig,
-    data::{directory::Directory, file::File, name::ItemName, timestamp::Timestamp},
+    data::{directory::Directory, file::File, path::PathInArchive, timestamp::Timestamp},
     diagnostic::Diagnostic,
     file_reader::FileReader,
     source::{ReadableSource, RealFile, WritableSource},
@@ -44,38 +41,17 @@ impl<S: ReadableSource> EasyArchive<S> {
         self.archive
     }
 
-    /// Split a path as a list of components
-    ///
-    /// Handles `.` and `..` symbol, prevents escapes from root
-    ///
-    /// Does not preserve the root symbol (`/` at the beginning of a path)
-    pub fn split_path(path: &str) -> Vec<String> {
-        let mut out = vec![];
-
-        for component in Path::new(path).components() {
-            match component {
-                Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
-                Component::ParentDir => {
-                    out.pop();
-                }
-                Component::Normal(normal) => out.push(normal.to_string_lossy().into_owned()),
-            }
-        }
-
-        out
-    }
-
     /// Get the item located the provided path
     pub fn get_item_at(&self, path: &str) -> Option<DirEntry> {
         let mut curr_item = None::<DirEntry>;
 
-        for segment in Self::split_path(path) {
+        for segment in PathInArchive::new(path).ok()?.components() {
             let curr_id = curr_item.map(|item| item.id());
 
             let new_item = self
                 .archive
                 .read_dir(curr_id)?
-                .find(|item| **item.name() == segment)?;
+                .find(|item| item.name() == segment)?;
 
             curr_item = Some(new_item);
         }
@@ -121,28 +97,29 @@ impl<S: WritableSource> EasyArchive<S> {
     /// Either returns the existing directory's informations or the newly-created one's
     pub fn get_or_create_dir(&mut self, path: &str) -> Result<Directory> {
         let mut curr_dir = None::<Directory>;
-        let mut curr_path = vec![];
+        let mut curr_path = PathInArchive::empty();
 
-        for segment in Self::split_path(path) {
+        let validated_path = PathInArchive::new(path)
+            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
+
+        for segment in validated_path.components() {
             let curr_id = curr_dir.map(|item| item.id);
 
             let item = self
                 .archive
                 .read_dir(curr_id)
                 .unwrap()
-                .find(|item| **item.name() == segment);
+                .find(|item| item.name() == segment);
 
             let dir = match item {
                 Some(DirEntry::Directory(dir)) => dir.clone(),
-                Some(DirEntry::File(_)) => bail!(
-                    "Cannot crate path '{path}' in archive: '{}' is a file",
-                    curr_path.join("/")
-                ),
+                Some(DirEntry::File(_)) => {
+                    bail!("Cannot crate path '{path}' in archive: '{curr_path}' is a file",)
+                }
                 None => {
                     let dir_id = self.archive.create_directory(
                         curr_id,
-                        ItemName::new(segment.to_owned())
-                            .map_err(|err| anyhow!("Component '{segment}' is invalid: {err}"))?,
+                        segment.clone(),
                         Timestamp::from(SystemTime::now()),
                     )?;
 
@@ -150,7 +127,7 @@ impl<S: WritableSource> EasyArchive<S> {
                 }
             };
 
-            curr_path.push(dir.name.clone());
+            curr_path.join(dir.name.clone());
             curr_dir = Some(dir);
         }
 
@@ -159,17 +136,15 @@ impl<S: WritableSource> EasyArchive<S> {
 
     /// Create a directory
     pub fn create_directory(&mut self, path: &str, modif_time: Timestamp) -> Result<u64> {
-        let mut path = Self::split_path(path);
+        let mut path = PathInArchive::new(path)
+            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
 
         let filename = path.pop().context("Path cannot be empty")?;
-
-        let filename = ItemName::new(filename)
-            .map_err(|err| anyhow!("Provided filename is invalid: {err}"))?;
 
         let parent_dir = if path.is_empty() {
             None
         } else {
-            Some(self.get_or_create_dir(&path.join("/"))?.id)
+            Some(self.get_or_create_dir(&path.to_string())?.id)
         };
 
         self.archive
@@ -190,17 +165,15 @@ impl<S: WritableSource> EasyArchive<S> {
                 .replace_file_content(path.id, modif_time, content);
         }
 
-        let mut path = Self::split_path(path);
+        let mut path = PathInArchive::new(path)
+            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
 
         let filename = path.pop().context("Path cannot be empty")?;
-
-        let filename = ItemName::new(filename)
-            .map_err(|err| anyhow!("Provided filename is invalid: {err}"))?;
 
         let parent_dir = if path.is_empty() {
             None
         } else {
-            Some(self.get_or_create_dir(&path.join("/"))?.id)
+            Some(self.get_or_create_dir(&path.to_string())?.id)
         };
 
         self.archive
