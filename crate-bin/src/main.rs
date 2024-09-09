@@ -85,7 +85,11 @@ fn inner_main() -> Result<()> {
             }
         }
 
-        Command::Add { path, items_path } => {
+        Command::Add {
+            path,
+            items_path,
+            under_dir,
+        } => {
             for item_path in &items_path {
                 if !item_path.exists() {
                     bail!("No item found at path '{}'", item_path.display());
@@ -114,7 +118,7 @@ fn inner_main() -> Result<()> {
             let mut archive = archive.easy();
 
             for item_path in &items_path {
-                add_item_to_archive(&mut archive, item_path)?;
+                add_item_to_archive(&mut archive, item_path, under_dir.as_deref())?;
             }
 
             archive.flush().context("Failed to close archive")?;
@@ -127,6 +131,7 @@ fn inner_main() -> Result<()> {
 fn add_item_to_archive(
     archive: &mut EasyArchive<impl WritableSource>,
     item_path: &Path,
+    under_dir: Option<&str>,
 ) -> Result<()> {
     if !item_path.exists() {
         bail!("Item at path '{}' does not exist", item_path.display());
@@ -146,7 +151,13 @@ fn add_item_to_archive(
         archive: &mut EasyArchive<impl WritableSource>,
         canon_path: &Path,
         path_in_archive: &str,
+        under_dir: Option<&str>,
     ) -> Result<()> {
+        let path_in_archive = under_dir.map_or_else(
+            || path_in_archive.to_owned(),
+            |under_dir| format!("{under_dir}/{path_in_archive}"),
+        );
+
         println!("Adding file '{path_in_archive}'...");
 
         let mtime = get_item_mtime(canon_path)?;
@@ -154,7 +165,7 @@ fn add_item_to_archive(
         let content = RealFile::open(canon_path).context("Failed to open file in read mode")?;
 
         archive
-            .create_or_update_file(path_in_archive, content, mtime)
+            .create_or_update_file(&path_in_archive, content, mtime)
             .context("Failed to add file to archive")?;
 
         Ok(())
@@ -182,7 +193,7 @@ fn add_item_to_archive(
             .to_str()
             .context("Filename contains invalid UTF-8 characters")?;
 
-        add_file_to_archive(archive, &canon_path, filename)
+        add_file_to_archive(archive, &canon_path, filename, under_dir)
     } else if mt.file_type().is_dir() {
         for item in WalkDir::new(&canon_path) {
             let item = item.context("Failed to read directory")?;
@@ -201,7 +212,7 @@ fn add_item_to_archive(
             })?;
 
             if item.file_type().is_file() {
-                add_file_to_archive(archive, item.path(), path_in_archive)?;
+                add_file_to_archive(archive, item.path(), path_in_archive, under_dir)?;
             } else if item.file_type().is_dir() {
                 println!("Creating directory '{path_in_archive}'...",);
 
