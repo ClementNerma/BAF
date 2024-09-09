@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use baf::{
-    archive::Archive,
     config::ArchiveConfig,
     data::{file::File, timestamp::Timestamp},
     easy::EasyArchive,
@@ -45,19 +44,19 @@ fn inner_main() -> Result<()> {
                 bail!("Path {} already exists", path.display());
             }
 
-            Archive::create_as_file(path, ArchiveConfig::default())
+            EasyArchive::create_as_file(path, ArchiveConfig::default())
                 .context("Failed to create archive")?;
         }
 
         Command::List { path } => {
-            let (archive, diags) = Archive::open_from_file(path, ArchiveConfig::default())
+            let (archive, diags) = EasyArchive::open_from_file(path, ArchiveConfig::default())
                 .context("Failed to open archive")?;
 
             for diag in diags {
                 eprintln!("WARNING: {diag}");
             }
 
-            let tree = Tree::new(&archive);
+            let tree = Tree::new(archive.inner());
 
             for FlattenedEntryDir { path, files } in tree.flatten_ordered() {
                 let path = PathBuf::from(path.join(std::path::MAIN_SEPARATOR_STR));
@@ -98,9 +97,9 @@ fn inner_main() -> Result<()> {
 
             let config = ArchiveConfig::default();
 
-            let archive = if path.exists() {
+            let mut archive = if path.exists() {
                 let (archive, diags) =
-                    Archive::open_from_file(&path, config).with_context(|| {
+                    EasyArchive::open_from_file(&path, config).with_context(|| {
                         format!("Failed to open archive at path '{}'", path.display())
                     })?;
 
@@ -110,12 +109,10 @@ fn inner_main() -> Result<()> {
 
                 archive
             } else {
-                Archive::create_as_file(&path, config).with_context(|| {
+                EasyArchive::create_as_file(&path, config).with_context(|| {
                     format!("Failed to create archive at path '{}'", path.display())
                 })?
             };
-
-            let mut archive = archive.easy();
 
             for item_path in &items_path {
                 add_item_to_archive(&mut archive, item_path, under_dir.as_deref())?;

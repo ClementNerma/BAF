@@ -1,7 +1,4 @@
-use std::{
-    collections::{hash_map::Values, HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{hash_map::Values, HashMap, HashSet};
 
 use anyhow::{bail, Context, Result};
 use sha3::{Digest, Sha3_256};
@@ -20,7 +17,7 @@ use crate::{
     diagnostic::Diagnostic,
     easy::EasyArchive,
     file_reader::FileReader,
-    source::{InMemorySource, ReadableSource, RealFile, WritableSource},
+    source::{InMemorySource, ReadableSource, WritableSource},
 };
 
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
@@ -890,26 +887,5 @@ impl<'a> DirEntry<'a> {
             DirEntry::Directory(dir) => &dir.name,
             DirEntry::File(file) => &file.name,
         }
-    }
-}
-
-impl Archive<RealFile> {
-    /// Open from a file (on-disk)
-    pub fn open_from_file(
-        path: impl AsRef<Path>,
-        conf: ArchiveConfig,
-    ) -> Result<(Self, Vec<Diagnostic>)> {
-        let file = RealFile::open(&path)
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
-
-        Self::open(file, conf)
-    }
-
-    /// Create an archive into a file
-    pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
-        let file = RealFile::create(&path)
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
-
-        Self::create(file, conf)
     }
 }

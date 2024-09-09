@@ -7,8 +7,10 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::{
     archive::{Archive, DirEntry},
+    config::ArchiveConfig,
     data::{directory::Directory, file::File, name::ItemName, timestamp::Timestamp},
-    source::{ReadableSource, WritableSource},
+    diagnostic::Diagnostic,
+    source::{ReadableSource, RealFile, WritableSource},
 };
 
 /// Representation of an abstraction over the base [`Archive`] type
@@ -255,5 +257,26 @@ impl<S: WritableSource> EasyArchive<S> {
     /// Flush all changes (e.g. to the disk)
     pub fn flush(&mut self) -> Result<()> {
         self.archive.flush()
+    }
+}
+
+impl EasyArchive<RealFile> {
+    /// Open from a file (on-disk)
+    pub fn open_from_file(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<(Self, Vec<Diagnostic>)> {
+        let file = RealFile::open(&path)
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+
+        Archive::open(file, conf).map(|(ar, diags)| (ar.easy(), diags))
+    }
+
+    /// Create an archive into a file
+    pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
+        let file = RealFile::create(&path)
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+
+        Archive::create(file, conf).map(Archive::easy)
     }
 }
