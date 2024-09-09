@@ -565,19 +565,6 @@ impl<S: WritableSource> Archive<S> {
     ) -> Result<u64> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
-        match self.names_in_dirs.get(&parent_dir) {
-            Some(names_in_parent_dir) => {
-                if names_in_parent_dir.contains(&name) {
-                    bail!(
-                        "File name '{}' is already used in parent directory with ID {parent_dir:?}",
-                        *name
-                    );
-                }
-            }
-
-            None => bail!("Provided parent directory ID does not exist"),
-        }
-
         let SegmentEntry {
             segment_index,
             entry_index,
