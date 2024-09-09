@@ -6,21 +6,18 @@ use super::{ConsumableSource, ReadableSource, WritableSource};
 ///
 /// It does not persist any data.
 /// If you want to store an archive with a file, see [`super::RealFile`] instead.
-pub struct InMemorySource {
+pub struct InMemoryData {
     data: Vec<u8>,
     position: u64,
 }
 
-impl InMemorySource {
+impl InMemoryData {
     /// Create an empty source
     pub fn new() -> Self {
         Self::from_data(vec![])
     }
 
-    /// Create a new memory source from an existing set of data
-    ///
-    /// Please note that the data's content is not validated for validity.
-    /// Please use at your own risk.
+    /// Create a new memory source from an existing vector of data
     pub fn from_data(data: Vec<u8>) -> Self {
         Self { data, position: 0 }
     }
@@ -36,13 +33,13 @@ impl InMemorySource {
     }
 }
 
-impl Default for InMemorySource {
+impl Default for InMemoryData {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ConsumableSource for InMemorySource {
+impl ConsumableSource for InMemoryData {
     fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
         if self.position + bytes > self.size() {
             bail!("End of input");
@@ -60,7 +57,7 @@ impl ConsumableSource for InMemorySource {
     }
 }
 
-impl ReadableSource for InMemorySource {
+impl ReadableSource for InMemoryData {
     fn position(&mut self) -> Result<u64> {
         Ok(self.position)
     }
@@ -71,12 +68,12 @@ impl ReadableSource for InMemorySource {
         Ok(())
     }
 
-    fn len(&self) -> Result<u64> {
+    fn len(&mut self) -> Result<u64> {
         Ok(self.size())
     }
 }
 
-impl WritableSource for InMemorySource {
+impl WritableSource for InMemoryData {
     fn write_all(&mut self, data: &[u8]) -> Result<()> {
         if self.position < self.size() {
             let position = usize::try_from(self.position).unwrap();

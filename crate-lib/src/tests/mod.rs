@@ -9,14 +9,14 @@ use crate::{
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
     data::{name::ItemName, timestamp::Timestamp},
-    source::{InMemorySource, RealFile, WritableSource},
+    source::{InMemoryData, RealFile, WritableSource},
 };
 
 static FILE_CONTENT: &[u8] = b"Hello world!";
 
 #[test]
 fn test_in_memory() -> Result<()> {
-    perform_test_with(InMemorySource::default())
+    perform_test_with(InMemoryData::new())
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             Some(directory_id),
             ItemName::new("file".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemorySource::from_data(FILE_CONTENT.to_vec()),
+            InMemoryData::from_data(FILE_CONTENT.to_vec()),
         )
         .unwrap();
 
@@ -63,7 +63,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             None,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemorySource::new(),
+            InMemoryData::new(),
         )?;
         archive.remove_file(file)?;
 
@@ -86,7 +86,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             Some(dir),
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemorySource::new(),
+            InMemoryData::new(),
         )?;
 
         archive.remove_directory(dir)?;
@@ -113,9 +113,9 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
         matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
-    assert_eq!(archive.get_file_content(2).unwrap(), FILE_CONTENT);
+    assert_eq!(archive.read_file_to_vec(2).unwrap(), FILE_CONTENT);
 
-    let mut file_reader = archive.get_file_reader(2).unwrap();
+    let mut file_reader = archive.read_file(2).unwrap();
     let mut file_content = vec![];
 
     assert_eq!(

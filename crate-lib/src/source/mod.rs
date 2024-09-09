@@ -2,10 +2,12 @@
 //!
 //! See [`file::RealFile`] and [`in_memory::InMemorySource`]
 
+mod cursor;
 mod in_memory;
 mod real_file;
+mod seekables;
 
-pub use self::{in_memory::InMemorySource, real_file::RealFile};
+pub use self::{in_memory::InMemoryData, real_file::RealFile, seekables::SeekWrapper};
 
 use anyhow::Result;
 
@@ -54,7 +56,7 @@ pub trait ReadableSource: ConsumableSource {
     fn set_position(&mut self, addr: u64) -> Result<()>;
 
     /// Get the total length, in bytes
-    fn len(&self) -> Result<u64>;
+    fn len(&mut self) -> Result<u64>;
 }
 
 /// A writable wource

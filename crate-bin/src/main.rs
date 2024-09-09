@@ -162,7 +162,7 @@ fn add_item_to_archive(
         let content = RealFile::open(canon_path).context("Failed to open file in read mode")?;
 
         archive
-            .create_or_update_file(&path_in_archive, content, mtime)
+            .write_file(&path_in_archive, content, mtime)
             .context("Failed to add file to archive")?;
 
         Ok(())

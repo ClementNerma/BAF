@@ -10,6 +10,7 @@ use crate::{
     config::ArchiveConfig,
     data::{directory::Directory, file::File, name::ItemName, timestamp::Timestamp},
     diagnostic::Diagnostic,
+    file_reader::FileReader,
     source::{ReadableSource, RealFile, WritableSource},
 };
 
@@ -74,12 +75,17 @@ impl<S: ReadableSource> EasyArchive<S> {
             let new_item = self
                 .archive
                 .read_dir(curr_id)?
-                .find(|item| item.name() == segment)?;
+                .find(|item| **item.name() == segment)?;
 
             curr_item = Some(new_item);
         }
 
         curr_item
+    }
+
+    /// Check if an item exists
+    pub fn exists(&self, path: &str) -> bool {
+        self.get_item_at(path).is_some()
     }
 
     /// Get the directory located the provided path
@@ -124,7 +130,7 @@ impl<S: WritableSource> EasyArchive<S> {
                 .archive
                 .read_dir(curr_id)
                 .unwrap()
-                .find(|item| item.name() == segment);
+                .find(|item| **item.name() == segment);
 
             let dir = match item {
                 Some(DirEntry::Directory(dir)) => dir.clone(),
@@ -172,7 +178,7 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 
     /// Either create a file with or replace an existing one
-    pub fn create_or_update_file(
+    pub fn write_file(
         &mut self,
         path: &str,
         content: impl ReadableSource,
@@ -217,7 +223,7 @@ impl<S: WritableSource> EasyArchive<S> {
             bail!("File already exists in archive at path '{path}'");
         }
 
-        self.create_or_update_file(path, content, modif_time)
+        self.write_file(path, content, modif_time)
     }
 
     /// Update an existing file
@@ -231,7 +237,34 @@ impl<S: WritableSource> EasyArchive<S> {
             bail!("File not found in archive at path '{path}'");
         }
 
-        self.create_or_update_file(path, content, modif_time)
+        self.write_file(path, content, modif_time)
+    }
+
+    /// Get a [`FileReader`] over a file contained inside the archive
+    pub fn read_file(&mut self, path: &str) -> Result<FileReader<S>> {
+        let id = self.get_file(path).context("File was not found")?.id;
+        self.archive.read_file(id)
+    }
+
+    /// Get the content of a file contained inside the archive into a vector of bytes
+    pub fn read_file_to_vec(&mut self, path: &str) -> Result<Vec<u8>> {
+        let id = self.get_file(path).context("File was not found")?.id;
+        self.archive.read_file_to_vec(id)
+    }
+
+    /// Get the content of a file contained inside the archive as a string
+    pub fn read_file_to_string(&mut self, path: &str) -> Result<String> {
+        let bytes = self.read_file_to_vec(path)?;
+        String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
+    }
+
+    /// Remove a file
+    pub fn remove_file(&mut self, path: &str) -> Result<()> {
+        let file = self.get_file(path).context("Provided file was not found")?;
+
+        self.archive.remove_file(file.id)?;
+
+        Ok(())
     }
 
     /// Remove a directory, recursively
@@ -241,15 +274,6 @@ impl<S: WritableSource> EasyArchive<S> {
             .context("Provided directory was not found")?;
 
         self.archive.remove_directory(dir.id)?;
-
-        Ok(())
-    }
-
-    /// Remove a file
-    pub fn remove_file(&mut self, path: &str) -> Result<()> {
-        let file = self.get_file(path).context("Provided file was not found")?;
-
-        self.archive.remove_file(file.id)?;
 
         Ok(())
     }

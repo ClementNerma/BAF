@@ -17,7 +17,7 @@ use crate::{
     diagnostic::Diagnostic,
     easy::EasyArchive,
     file_reader::FileReader,
-    source::{InMemorySource, ReadableSource, WritableSource},
+    source::{InMemoryData, ReadableSource, WritableSource},
 };
 
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
@@ -106,9 +106,14 @@ impl<S: ReadableSource> Archive<S> {
         ))
     }
 
-    /// Get an [`crate::easy::EasyArchive`] abstraction for easier handling of this archive.
+    /// Get an [`EasyArchive`] abstraction for easier handling of this archive.
     pub fn easy(self) -> EasyArchive<S> {
         EasyArchive::new(self)
+    }
+
+    /// Get access to the underlying source
+    pub fn source(&mut self) -> &mut S {
+        &mut self.source
     }
 
     /// Get the content of the archive's header
@@ -173,8 +178,21 @@ impl<S: ReadableSource> Archive<S> {
         Some(dirs.chain(files))
     }
 
-    /// Get the content of a file contained inside the archive
-    pub fn get_file_content(&mut self, id: u64) -> Result<Vec<u8>> {
+    /// Get a [`FileReader`] over a file contained inside the archive
+    pub fn read_file(&mut self, id: u64) -> Result<FileReader<S>> {
+        let file = self.files.get(&id).context("File not found in archive")?;
+
+        self.source.set_position(file.content_addr)?;
+
+        Ok(FileReader::new(
+            &mut self.source,
+            file.content_len,
+            file.sha3_checksum,
+        ))
+    }
+
+    /// Get the content of a file contained inside the archive into a vector of bytes
+    pub fn read_file_to_vec(&mut self, id: u64) -> Result<Vec<u8>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
         self.source.set_position(file.content_addr)?;
@@ -194,19 +212,6 @@ impl<S: ReadableSource> Archive<S> {
         }
 
         Ok(bytes)
-    }
-
-    /// Get a [`crate::file_reader::FileReader`] over a file contained inside the archive
-    pub fn get_file_reader(&mut self, id: u64) -> Result<FileReader<S>> {
-        let file = self.files.get(&id).context("File not found in archive")?;
-
-        self.source.set_position(file.content_addr)?;
-
-        Ok(FileReader::new(
-            &mut self.source,
-            file.content_len,
-            file.sha3_checksum,
-        ))
     }
 
     fn get_item_entry(&self, id: u64, item_type: ItemType) -> Result<SegmentEntry> {
@@ -403,7 +408,7 @@ impl<S: WritableSource> Archive<S> {
 
         // Write new segment
         let (new_segment_addr, _) =
-            self.write_data_where_possible(InMemorySource::from_data(segment.encode()))?;
+            self.write_data_where_possible(InMemoryData::from_data(segment.encode()))?;
 
         // Update previous segment's 'next address'
         self.source
@@ -565,7 +570,7 @@ impl<S: WritableSource> Archive<S> {
         parent_dir: Option<u64>,
         name: ItemName,
         modif_time: Timestamp,
-        content: impl ReadableSource,
+        mut content: impl ReadableSource,
     ) -> Result<u64> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
@@ -624,7 +629,7 @@ impl<S: WritableSource> Archive<S> {
         &mut self,
         id: u64,
         new_modif_time: Timestamp,
-        new_content: impl ReadableSource,
+        mut new_content: impl ReadableSource,
     ) -> Result<()> {
         let SegmentEntry {
             segment_index,
@@ -882,7 +887,7 @@ impl<'a> DirEntry<'a> {
         }
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &ItemName {
         match self {
             DirEntry::Directory(dir) => &dir.name,
             DirEntry::File(file) => &file.name,

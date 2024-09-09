@@ -89,6 +89,18 @@ impl Borrow<str> for ItemName {
     }
 }
 
+impl AsRef<str> for ItemName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for ItemName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Error that occurred during name decoding
 #[derive(Debug)]
 pub struct NameDecodingError {

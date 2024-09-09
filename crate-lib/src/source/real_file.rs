@@ -120,7 +120,7 @@ impl ReadableSource for RealFile {
         Ok(())
     }
 
-    fn len(&self) -> Result<u64> {
+    fn len(&mut self) -> Result<u64> {
         Ok(self
             .file
             .metadata()
