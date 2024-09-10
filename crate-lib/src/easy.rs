@@ -127,7 +127,7 @@ impl<S: WritableSource> EasyArchive<S> {
                 }
             };
 
-            curr_path.join(dir.name.clone());
+            curr_path.append(dir.name.clone());
             curr_dir = Some(dir);
         }
 

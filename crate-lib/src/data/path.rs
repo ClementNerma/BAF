@@ -85,15 +85,27 @@ impl PathInArchive {
     }
 
     /// Append a new component
-    pub fn join(&mut self, component: ItemName) {
+    pub fn append(&mut self, component: ItemName) {
         self.0.push(component);
     }
 
     /// Append a new string component
-    pub fn join_str(mut self, component: impl Into<String>) -> Result<(), NameValidationError> {
+    pub fn append_str(&mut self, component: impl Into<String>) -> Result<(), NameValidationError> {
         let name = ItemName::new(component.into())?;
-        self.join(name);
+        self.append(name);
         Ok(())
+    }
+
+    /// Append a new component and return the new path
+    pub fn join(mut self, component: ItemName) -> Self {
+        self.append(component);
+        self
+    }
+
+    /// Append a new string component and return the new path
+    pub fn join_str(mut self, component: impl Into<String>) -> Result<Self, NameValidationError> {
+        self.append_str(component)?;
+        Ok(self)
     }
 }
 
