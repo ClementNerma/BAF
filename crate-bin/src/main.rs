@@ -211,7 +211,7 @@ fn add_item_to_archive(
             if item.file_type().is_file() {
                 add_file_to_archive(archive, item.path(), path_in_archive, under_dir)?;
             } else if item.file_type().is_dir() {
-                println!("Creating directory '{path_in_archive}'...",);
+                println!("Creating directory '{path_in_archive}'...");
 
                 let mtime = get_item_mtime(item.path())?;
 
@@ -219,7 +219,7 @@ fn add_item_to_archive(
             } else {
                 eprintln!(
                     "WARN: Ignoring unknown item type at path '{}'",
-                    canon_path.display()
+                    item.path().display()
                 );
             }
         }
