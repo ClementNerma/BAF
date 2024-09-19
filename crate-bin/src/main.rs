@@ -148,21 +148,15 @@ fn add_item_to_archive(
         archive: &mut EasyArchive<impl WritableSource>,
         canon_path: &Path,
         path_in_archive: &str,
-        under_dir: Option<&str>,
     ) -> Result<()> {
-        let path_in_archive = under_dir.map_or_else(
-            || path_in_archive.to_owned(),
-            |under_dir| format!("{under_dir}/{path_in_archive}"),
-        );
-
         println!("Adding file '{path_in_archive}'...");
 
-        let mtime = get_item_mtime(canon_path)?;
-
-        let content = RealFile::open(canon_path).context("Failed to open file in read mode")?;
-
         archive
-            .write_file(&path_in_archive, content, mtime)
+            .write_file(
+                path_in_archive,
+                RealFile::open(canon_path).context("Failed to open file in read mode")?,
+                get_item_mtime(canon_path)?,
+            )
             .context("Failed to add file to archive")?;
 
         Ok(())
@@ -171,10 +165,10 @@ fn add_item_to_archive(
     fn get_item_mtime(path: &Path) -> Result<Timestamp> {
         let mtime = path
             .metadata()
-            .context("Failed to get metadata for file")?
+            .context("Failed to get metadata for item")?
             .modified()
             .unwrap_or_else(|err| {
-                eprintln!("WARN: Failed to get the file's modification time ({err}) ; falling back to current time");
+                eprintln!("WARN: Failed to get the item's modification time ({err}) ; falling back to system's current time");
                 SystemTime::now()
             });
 
@@ -190,32 +184,54 @@ fn add_item_to_archive(
             .to_str()
             .context("Filename contains invalid UTF-8 characters")?;
 
-        add_file_to_archive(archive, &canon_path, filename, under_dir)
+        add_file_to_archive(
+            archive,
+            &canon_path,
+            &match under_dir {
+                Some(dir) => format!("{dir}/{filename}"),
+                None => filename.to_owned(),
+            },
+        )
     } else if mt.file_type().is_dir() {
+        let under_dir = match under_dir {
+            Some(dir) => dir,
+            None => {
+                let basename = canon_path.file_name().with_context(|| {
+                    format!("Failed to determine file name of: {}", canon_path.display())
+                })?;
+
+                basename.to_str().with_context(|| {
+                    format!("Directory name contains invalid UTF-8 characters: {basename:?}",)
+                })?
+            }
+        };
+
         for item in WalkDir::new(&canon_path) {
             let item = item.context("Failed to read directory")?;
 
-            let path_in_archive = item.path().strip_prefix(&canon_path).unwrap();
+            let stripped_path = item.path().strip_prefix(&canon_path).unwrap();
 
-            if path_in_archive.as_os_str().is_empty() {
+            if stripped_path.as_os_str().is_empty() {
                 continue;
             }
 
-            let path_in_archive = path_in_archive.to_str().with_context(|| {
+            let stripped_path = stripped_path.to_str().with_context(|| {
                 format!(
                     "Path '{}' contains invalid UTF-8 characters",
-                    path_in_archive.display()
+                    stripped_path.display()
                 )
             })?;
 
+            let path_in_archive = format!("{under_dir}/{stripped_path}");
+
             if item.file_type().is_file() {
-                add_file_to_archive(archive, item.path(), path_in_archive, under_dir)?;
+                add_file_to_archive(archive, item.path(), &path_in_archive)?;
             } else if item.file_type().is_dir() {
                 println!("Creating directory '{path_in_archive}'...");
 
                 let mtime = get_item_mtime(item.path())?;
 
-                archive.create_directory(path_in_archive, mtime)?;
+                archive.create_directory(&path_in_archive, mtime)?;
             } else {
                 eprintln!(
                     "WARN: Ignoring unknown item type at path '{}'",
