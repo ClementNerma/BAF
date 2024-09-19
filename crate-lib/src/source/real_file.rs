@@ -11,30 +11,27 @@ use super::{ConsumableSource, ReadableSource, WritableSource};
 /// Representation of a real file (e.g. on-disk)
 ///
 /// Uses buffer reading and writing
-pub struct RealFile {
+pub struct RealFile<const WRITABLE: bool> {
     file: File,
     buffered: Buffered,
     position: u64,
 }
 
-impl RealFile {
-    /// Open an existing archive (must already exist)
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_inner(path, |opts| opts)
-    }
+pub type ReadonlyFile = RealFile<false>;
+pub type WriteableFile = RealFile<true>;
 
-    /// Create a new archive (will not write any data by itself)
-    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_inner(path, |opts| opts.create_new(true))
-    }
-
-    fn open_inner(
+impl<const WRITABLE: bool> RealFile<WRITABLE> {
+    fn open_file(
         path: impl AsRef<Path>,
         map: impl FnOnce(&mut OpenOptions) -> &mut OpenOptions,
-    ) -> Result<Self> {
-        let file = map(OpenOptions::new().truncate(false).read(true).write(true)).open(path)?;
+    ) -> Result<RealFile<WRITABLE>> {
+        let file = map(OpenOptions::new()
+            .truncate(false)
+            .read(true)
+            .write(WRITABLE))
+        .open(path)?;
 
-        Ok(Self {
+        Ok(RealFile {
             buffered: Buffered::writer(&file)?,
             file,
             position: 0,
@@ -64,6 +61,25 @@ impl RealFile {
             Buffered::Writer(_) => unreachable!(),
         }
     }
+}
+
+impl RealFile<false> {
+    /// Open an existing file file as readonly
+    pub fn open_readonly(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_file(path, |opts| opts)
+    }
+}
+
+impl RealFile<true> {
+    /// Open an existing file in writeable mode
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_file(path, |opts| opts)
+    }
+
+    /// Create a new archive (will not write any data by itself)
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_file(path, |opts| opts.create_new(true))
+    }
 
     /// Get a buffered writer
     fn writer(&mut self) -> Result<&mut BufWriter<File>> {
@@ -87,7 +103,7 @@ impl RealFile {
     }
 }
 
-impl ConsumableSource for RealFile {
+impl<const WRITABLE: bool> ConsumableSource for RealFile<WRITABLE> {
     fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
         self.reader()?
             .read_exact(&mut buf[0..usize::try_from(bytes).unwrap()])
@@ -99,7 +115,7 @@ impl ConsumableSource for RealFile {
     }
 }
 
-impl ReadableSource for RealFile {
+impl<const WRITABLE: bool> ReadableSource for RealFile<WRITABLE> {
     fn position(&mut self) -> Result<u64> {
         Ok(self.position)
     }
@@ -129,7 +145,7 @@ impl ReadableSource for RealFile {
     }
 }
 
-impl WritableSource for RealFile {
+impl WritableSource for RealFile<true> {
     fn write_all(&mut self, data: &[u8]) -> Result<()> {
         self.writer()?
             .write_all(data)

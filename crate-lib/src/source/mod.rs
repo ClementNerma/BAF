@@ -7,7 +7,11 @@ mod in_memory;
 mod real_file;
 mod seekables;
 
-pub use self::{in_memory::InMemoryData, real_file::RealFile, seekables::SeekWrapper};
+pub use self::{
+    in_memory::InMemoryData,
+    real_file::{ReadonlyFile, RealFile, WriteableFile},
+    seekables::SeekWrapper,
+};
 
 use anyhow::Result;
 

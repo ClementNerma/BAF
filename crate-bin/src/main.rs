@@ -14,7 +14,7 @@ use baf::{
     config::ArchiveConfig,
     data::{file::File, timestamp::Timestamp},
     easy::EasyArchive,
-    source::{RealFile, WritableSource},
+    source::{ReadonlyFile, WritableSource},
 };
 use clap::Parser;
 use walkdir::WalkDir;
@@ -154,7 +154,8 @@ fn add_item_to_archive(
         archive
             .write_file(
                 path_in_archive,
-                RealFile::open(canon_path).context("Failed to open file in read mode")?,
+                ReadonlyFile::open_readonly(canon_path)
+                    .context("Failed to open file in read mode")?,
                 get_item_mtime(canon_path)?,
             )
             .context("Failed to add file to archive")?;

@@ -8,7 +8,7 @@ use crate::{
     data::{directory::Directory, file::File, path::PathInArchive, timestamp::Timestamp},
     diagnostic::Diagnostic,
     file_reader::FileReader,
-    source::{ReadableSource, RealFile, WritableSource},
+    source::{ReadableSource, ReadonlyFile, RealFile, WritableSource, WriteableFile},
 };
 
 /// Representation of an abstraction over the base [`Archive`] type
@@ -257,7 +257,20 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 }
 
-impl EasyArchive<RealFile> {
+impl EasyArchive<ReadonlyFile> {
+    /// Open from a file (on-disk)
+    pub fn open_from_file_readonly(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<(Self, Vec<Diagnostic>)> {
+        let file = RealFile::open_readonly(&path)
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+
+        Archive::open(file, conf).map(|(ar, diags)| (ar.easy(), diags))
+    }
+}
+
+impl EasyArchive<WriteableFile> {
     /// Open from a file (on-disk)
     pub fn open_from_file(
         path: impl AsRef<Path>,
