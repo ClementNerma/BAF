@@ -41,31 +41,67 @@ impl Tree {
         }
     }
 
-    // TODO: could be optimized to use iterators, would avoid lots of allocations
-    pub fn flatten_ordered(&self) -> Vec<FlattenedEntryDir> {
-        let mut out = vec![];
-
-        self.flatten_unordered(&mut out);
-
-        out.sort_by(|a, b| a.path.cmp(&b.path));
-        out
+    pub fn flattened(&self) -> FlattenedTreeIter {
+        FlattenedTreeIter::new(self)
     }
+}
 
-    fn flatten_unordered(&self, out: &mut Vec<FlattenedEntryDir>) {
-        let Self { path, dirs, files } = &self;
+pub struct FlattenedEntryDir<'a> {
+    pub path: &'a Vec<String>,
+    pub files: &'a Vec<File>,
+}
 
-        out.push(FlattenedEntryDir {
-            path: path.clone(),
-            files: files.clone(),
-        });
+pub struct FlattenedTreeIter<'a> {
+    tree: &'a Tree,
+    sent_self: bool,
+    child_iter: Option<(usize, Box<FlattenedTreeIter<'a>>)>,
+}
 
-        for (_, tree) in dirs {
-            tree.flatten_unordered(out);
+impl<'a> FlattenedTreeIter<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        Self {
+            tree,
+            sent_self: false,
+            child_iter: None,
         }
     }
 }
 
-pub struct FlattenedEntryDir {
-    pub path: Vec<String>,
-    pub files: Vec<File>,
+impl<'a> Iterator for FlattenedTreeIter<'a> {
+    type Item = FlattenedEntryDir<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tree = &self.tree;
+
+        if !self.sent_self {
+            self.sent_self = true;
+
+            return Some(FlattenedEntryDir {
+                path: &tree.path,
+                files: &tree.files,
+            });
+        }
+
+        let Some((child_pos, child_iter)) = &mut self.child_iter else {
+            let (_, first_child) = tree.dirs.first()?;
+
+            self.child_iter = Some((0, Box::new(FlattenedTreeIter::new(first_child))));
+
+            return self.next();
+        };
+
+        if let Some(next) = child_iter.next() {
+            return Some(next);
+        }
+
+        if *child_pos == tree.dirs.len() {
+            return None;
+        }
+
+        let (_, next_child) = &tree.dirs[*child_pos];
+
+        self.child_iter = Some((*child_pos + 1, Box::new(FlattenedTreeIter::new(next_child))));
+
+        self.next()
+    }
 }

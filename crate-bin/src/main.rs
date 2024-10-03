@@ -58,7 +58,10 @@ fn inner_main() -> Result<()> {
 
             let tree = Tree::new(archive.inner());
 
-            for FlattenedEntryDir { path, files } in tree.flatten_ordered() {
+            let mut flattened = tree.flattened().collect::<Vec<_>>();
+            flattened.sort_by_key(|entry| entry.path);
+
+            for FlattenedEntryDir { path, files } in flattened {
                 let path = PathBuf::from(path.join(std::path::MAIN_SEPARATOR_STR));
 
                 if path.components().count() != 0 {
@@ -78,7 +81,7 @@ fn inner_main() -> Result<()> {
 
                     println!(
                         "[File] {} ({content_len} bytes)",
-                        path.join(&*name).display()
+                        path.join(name.as_ref()).display()
                     );
                 }
             }
