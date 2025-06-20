@@ -1,4 +1,4 @@
-use std::io::{Error, ErrorKind, Read};
+use std::io::{Error, Read};
 
 use sha3::{Digest, Sha3_256};
 
@@ -34,13 +34,10 @@ impl<'a, S: ReadableSource> FileReader<'a, S> {
         let hash: [u8; 32] = self.pending_checksum.clone().finalize().into();
 
         if hash != self.expected_checksum {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "File's hash doesn't match: expected {:#?}, got {hash:#?}",
-                    self.expected_checksum
-                ),
-            ))
+            Err(Error::other(format!(
+                "File's hash doesn't match: expected {:#?}, got {hash:#?}",
+                self.expected_checksum
+            )))
         } else {
             Ok(())
         }
@@ -60,7 +57,7 @@ impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
         let bytes = self
             .source
             .consume_into_vec(read_len)
-            .map_err(|err| Error::new(ErrorKind::Other, format!("{err:?}")))?;
+            .map_err(|err| Error::other(format!("{err:?}")))?;
 
         buf[0..read_len_usize].copy_from_slice(&bytes);
 

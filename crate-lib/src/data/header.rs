@@ -17,7 +17,7 @@ pub struct Header {
 
 impl Header {
     /// Decode the header of an archive from a readable source
-    pub fn decode<S: ReadableSource>(source: &mut S) -> Result<SourceWithHeader<S>> {
+    pub fn decode<S: ReadableSource>(source: &mut S) -> Result<SourceWithHeader<'_, S>> {
         source.set_position(0)?;
 
         let got_magic_number = source.consume_to_array::<8>()?;

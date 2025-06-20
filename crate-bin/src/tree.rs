@@ -41,7 +41,7 @@ impl Tree {
         }
     }
 
-    pub fn flattened(&self) -> FlattenedTreeIter {
+    pub fn flattened(&self) -> FlattenedTreeIter<'_> {
         FlattenedTreeIter::new(self)
     }
 }

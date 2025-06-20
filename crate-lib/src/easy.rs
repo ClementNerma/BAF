@@ -42,7 +42,7 @@ impl<S: ReadableSource> EasyArchive<S> {
     }
 
     /// Get the item located the provided path
-    pub fn get_item_at(&self, path: &str) -> Option<DirEntry> {
+    pub fn get_item_at(&self, path: &str) -> Option<DirEntry<'_>> {
         let mut curr_item = None::<DirEntry>;
 
         for segment in PathInArchive::new(path).ok()?.components() {
@@ -85,7 +85,7 @@ impl<S: ReadableSource> EasyArchive<S> {
     }
 
     /// Iterate over a directory's items
-    pub fn read_dir(&self, path: &str) -> Option<impl Iterator<Item = DirEntry>> {
+    pub fn read_dir(&self, path: &str) -> Option<impl Iterator<Item = DirEntry<'_>>> {
         let dir = self.get_directory(path)?;
         Some(self.archive.read_dir(Some(dir.id)).unwrap())
     }
@@ -214,7 +214,7 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
-    pub fn read_file(&mut self, path: &str) -> Result<FileReader<S>> {
+    pub fn read_file(&mut self, path: &str) -> Result<FileReader<'_, S>> {
         let id = self.get_file(path).context("File was not found")?.id;
         self.archive.read_file(id)
     }

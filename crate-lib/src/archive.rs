@@ -122,12 +122,12 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get the list of all directories contained inside the archive
-    pub fn dirs(&self) -> Values<u64, Directory> {
+    pub fn dirs(&self) -> Values<'_, u64, Directory> {
         self.dirs.values()
     }
 
     /// Get the list of all files contained inside the archive
-    pub fn files(&self) -> Values<u64, File> {
+    pub fn files(&self) -> Values<'_, u64, File> {
         self.files.values()
     }
 
@@ -154,7 +154,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Iterate over all items inside a directory contained inside the archive
-    pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = DirEntry>> {
+    pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = DirEntry<'_>>> {
         if let Some(id) = id {
             if !self.dirs.contains_key(&id) {
                 return None;
@@ -179,7 +179,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
-    pub fn read_file(&mut self, id: u64) -> Result<FileReader<S>> {
+    pub fn read_file(&mut self, id: u64) -> Result<FileReader<'_, S>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
         self.source.set_position(file.content_addr)?;

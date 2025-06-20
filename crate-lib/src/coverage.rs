@@ -54,7 +54,7 @@ impl Coverage {
     }
 
     /// Find the next free (unused) zones
-    pub fn find_free_zones(&self) -> FreeSegmentsIter {
+    pub fn find_free_zones(&self) -> FreeSegmentsIter<'_> {
         FreeSegmentsIter::new(self)
     }
 
