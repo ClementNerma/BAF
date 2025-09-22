@@ -7,10 +7,6 @@
 #![forbid(unsafe_code)]
 #![forbid(unused_must_use)]
 #![warn(unused_crate_dependencies)]
-//
-// TODO: nightly
-//
-#![feature(seek_stream_len)]
 
 pub mod archive;
 pub mod config;

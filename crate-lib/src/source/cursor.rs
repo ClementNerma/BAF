@@ -26,6 +26,14 @@ impl<T: AsRef<[u8]>> ReadableSource for Cursor<T> {
 
     fn len(&mut self) -> Result<u64> {
         // NOTE: cursor's position may have changed in case of failure
-        self.stream_len().context("Failed to get data length")
+        stream_len_default(self).context("Failed to get data length")
     }
+}
+
+// TODO: remove once https://github.com/rust-lang/rust/issues/59359 is resolved
+pub fn stream_len_default(stream: &mut impl Seek) -> Result<u64> {
+    let old_pos = stream.stream_position()?;
+    let len = stream.seek(SeekFrom::End(0))?;
+    stream.seek(SeekFrom::Start(old_pos))?;
+    Ok(len)
 }
