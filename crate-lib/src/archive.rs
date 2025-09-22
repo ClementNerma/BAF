@@ -1,16 +1,16 @@
-use std::collections::{hash_map::Values, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Values};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use sha3::{Digest, Sha3_256};
 
 use crate::{
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
     data::{
-        directory::{Directory, DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY},
-        file::{File, FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY},
+        directory::{DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY, Directory},
+        file::{FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY, File},
         ft_segment::FileTableSegment,
-        header::{Header, HEADER_SIZE},
+        header::{HEADER_SIZE, Header},
         name::ItemName,
         timestamp::Timestamp,
     },
@@ -155,10 +155,8 @@ impl<S: ReadableSource> Archive<S> {
 
     /// Iterate over all items inside a directory contained inside the archive
     pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = DirEntry<'_>>> {
-        if let Some(id) = id {
-            if !self.dirs.contains_key(&id) {
-                return None;
-            }
+        if id.is_some_and(|id| !self.dirs.contains_key(&id)) {
+            return None;
         }
 
         // TODO: optimize to not require a filter over ALL directories
@@ -539,17 +537,19 @@ impl<S: WritableSource> Archive<S> {
         self.source.write_all(directory.encode().as_ref())?;
 
         // Update names listing for parent directory
-        assert!(self
-            .names_in_dirs
-            .get_mut(&directory.parent_dir)
-            .unwrap()
-            .insert(directory.name.clone()));
+        assert!(
+            self.names_in_dirs
+                .get_mut(&directory.parent_dir)
+                .unwrap()
+                .insert(directory.name.clone())
+        );
 
         // Create names listing for this directory
-        assert!(self
-            .names_in_dirs
-            .insert(Some(id), HashSet::new())
-            .is_none());
+        assert!(
+            self.names_in_dirs
+                .insert(Some(id), HashSet::new())
+                .is_none()
+        );
 
         // Update in-memory file segments
         self.file_segments[segment_index].dirs[entry_index] = Some(directory.clone());
@@ -607,11 +607,12 @@ impl<S: WritableSource> Archive<S> {
         self.source.write_all(file.encode().as_ref())?;
 
         // Update names listing for parent directory
-        assert!(self
-            .names_in_dirs
-            .get_mut(&file.parent_dir)
-            .unwrap()
-            .insert(file.name.clone()));
+        assert!(
+            self.names_in_dirs
+                .get_mut(&file.parent_dir)
+                .unwrap()
+                .insert(file.name.clone())
+        );
 
         // Update in-memory segments
         self.file_segments[segment_index].files[entry_index] = Some(file.clone());
@@ -795,11 +796,12 @@ impl<S: WritableSource> Archive<S> {
         // Unregister the directory and remove its name from the listing
         let dir = self.dirs.remove(&id).unwrap();
 
-        assert!(self
-            .names_in_dirs
-            .get_mut(&dir.parent_dir)
-            .unwrap()
-            .remove(&dir.name));
+        assert!(
+            self.names_in_dirs
+                .get_mut(&dir.parent_dir)
+                .unwrap()
+                .remove(&dir.name)
+        );
 
         // Remove names listing for this directory
         let names_in_dir = self.names_in_dirs.remove(&Some(id)).unwrap();
@@ -832,11 +834,12 @@ impl<S: WritableSource> Archive<S> {
         // Unregister the file and remove its name from the listing
         let file = self.files.remove(&id).unwrap();
 
-        assert!(self
-            .names_in_dirs
-            .get_mut(&file.parent_dir)
-            .unwrap()
-            .remove(&file.name));
+        assert!(
+            self.names_in_dirs
+                .get_mut(&file.parent_dir)
+                .unwrap()
+                .remove(&file.name)
+        );
 
         // Update coverage
         self.coverage.mark_as_free(Segment {
