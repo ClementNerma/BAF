@@ -11,14 +11,28 @@ use super::{
 pub static FILE_ENTRY_SIZE: u64 = 328;
 pub static FILE_NAME_OFFSET_IN_ENTRY: u64 = 16;
 
+/// Representation of a file inside an archive
 #[derive(Debug, Clone)]
 pub struct File {
+    /// Unique identifier (in the archive)
     pub id: u64,
+
+    /// ID of the parent directory
     pub parent_dir: Option<u64>,
+
+    /// Name of the file (must be a valid UTF-8 string)
     pub name: ItemName,
+
+    /// Last modification time
     pub modif_time: Timestamp,
+
+    /// Offset, in bytes inside the archive, of the file's content
     pub content_addr: u64,
+
+    /// Length, in bytes, of the file's content
     pub content_len: u64,
+
+    /// SHA-3 checksum of the file's content
     pub sha3_checksum: [u8; 32],
 }
 
