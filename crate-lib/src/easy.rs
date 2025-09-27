@@ -1,6 +1,6 @@
 use std::{path::Path, time::SystemTime};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::{
     archive::{Archive, DirEntry},

@@ -1,4 +1,4 @@
-use std::collections::{btree_set, BTreeSet};
+use std::collections::{BTreeSet, btree_set};
 
 // TODO: remove segments when empty?
 // TODO: shrink archive when needed?

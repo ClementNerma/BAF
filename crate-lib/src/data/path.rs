@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::name::{ItemName, NameValidationError};
 

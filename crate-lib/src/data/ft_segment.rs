@@ -3,8 +3,8 @@ use anyhow::Result;
 use crate::{diagnostic::Diagnostic, ensure_only_one_version, source::ReadableSource};
 
 use super::{
-    directory::{Directory, DIRECTORY_ENTRY_SIZE},
-    file::{File, FILE_ENTRY_SIZE},
+    directory::{DIRECTORY_ENTRY_SIZE, Directory},
+    file::{FILE_ENTRY_SIZE, File},
     header::SourceWithHeader,
 };
 
