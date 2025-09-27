@@ -3,21 +3,21 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Parser)]
-pub enum Command {
-    Create {
-        #[clap(help = "Path to create")]
-        path: PathBuf,
-    },
+pub struct CmdArgs {
+    #[clap(help = "Path to the archive")]
+    pub path: PathBuf,
 
-    List {
-        #[clap(help = "Path to the archive")]
-        path: PathBuf,
-    },
+    #[clap(subcommand)]
+    pub action: Action,
+}
+
+#[derive(Parser)]
+pub enum Action {
+    Create,
+
+    List,
 
     Add {
-        #[clap(help = "Path to the archive")]
-        path: PathBuf,
-
         #[clap(help = "Items to add (files or directories)")]
         items_path: Vec<PathBuf>,
 

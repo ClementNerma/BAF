@@ -9,7 +9,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use baf::{
     config::ArchiveConfig,
     data::{file::File, timestamp::Timestamp},
@@ -20,7 +20,7 @@ use clap::Parser;
 use walkdir::WalkDir;
 
 use self::{
-    args::Command,
+    args::{Action, CmdArgs},
     tree::{FlattenedEntryDir, Tree},
 };
 
@@ -38,8 +38,10 @@ fn main() -> ExitCode {
 }
 
 fn inner_main() -> Result<()> {
-    match Command::parse() {
-        Command::Create { path } => {
+    let CmdArgs { path, action } = CmdArgs::parse();
+
+    match action {
+        Action::Create => {
             if path.exists() {
                 bail!("Path {} already exists", path.display());
             }
@@ -48,7 +50,7 @@ fn inner_main() -> Result<()> {
                 .context("Failed to create archive")?;
         }
 
-        Command::List { path } => {
+        Action::List => {
             let (archive, diags) = EasyArchive::open_from_file(path, ArchiveConfig::default())
                 .context("Failed to open archive")?;
 
@@ -87,8 +89,7 @@ fn inner_main() -> Result<()> {
             }
         }
 
-        Command::Add {
-            path,
+        Action::Add {
             items_path,
             under_dir,
         } => {
