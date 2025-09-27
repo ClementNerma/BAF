@@ -12,14 +12,6 @@ impl Timestamp {
         Self::from(SystemTime::now())
     }
 
-    pub fn secs_since_epoch(&self) -> u64 {
-        self.0
-    }
-
-    pub fn system_time(&self) -> SystemTime {
-        SystemTime::from(*self)
-    }
-
     pub fn encode(&self) -> [u8; 8] {
         self.0.to_le_bytes()
     }
