@@ -27,30 +27,10 @@ impl<'a, S: ReadableSource> FileReader<'a, S> {
             pos: 0,
         }
     }
-
-    fn validate_checksum_after_reading(&self) -> std::io::Result<()> {
-        assert_eq!(self.pos, self.len);
-
-        let hash: [u8; 32] = self.pending_checksum.clone().finalize().into();
-
-        if hash != self.expected_checksum {
-            Err(Error::other(format!(
-                "File's hash doesn't match: expected {:#?}, got {hash:#?}",
-                self.expected_checksum
-            )))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.len == 0 {
-            self.validate_checksum_after_reading()?;
-            return Ok(0);
-        }
-
         let read_len = std::cmp::min(u64::try_from(buf.len()).unwrap(), self.len - self.pos);
         let read_len_usize = usize::try_from(read_len).unwrap();
 
@@ -65,8 +45,16 @@ impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
 
         self.pos += read_len;
 
+        // When the entire file has been read, check its validity by comparing the checksums
         if self.pos == self.len {
-            self.validate_checksum_after_reading()?;
+            let hash: [u8; 32] = self.pending_checksum.clone().finalize().into();
+
+            if hash != self.expected_checksum {
+                return Err(Error::other(format!(
+                    "File's hash doesn't match: expected {:#?}, got {hash:#?}",
+                    self.expected_checksum
+                )));
+            }
         }
 
         Ok(read_len_usize)
