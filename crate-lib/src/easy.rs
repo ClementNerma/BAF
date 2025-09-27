@@ -152,7 +152,7 @@ impl<S: WritableSource> EasyArchive<S> {
             .context("Failed to create file")
     }
 
-    /// Either create a file with or replace an existing one
+    /// Either create a file or replace an existing one
     pub fn write_file(
         &mut self,
         path: &str,
