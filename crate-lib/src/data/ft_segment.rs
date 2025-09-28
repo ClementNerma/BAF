@@ -1,15 +1,13 @@
-use anyhow::Result;
-
-use crate::{diagnostic::Diagnostic, ensure_only_one_version, source::ReadableSource};
+use crate::{ensure_only_one_version, source::ReadableSource};
 
 use super::{
-    directory::{DIRECTORY_ENTRY_SIZE, Directory},
-    file::{FILE_ENTRY_SIZE, File},
+    directory::{DIRECTORY_ENTRY_SIZE, Directory, DirectoryDecodingError},
+    file::{FILE_ENTRY_SIZE, File, FileDecodingError},
     header::SourceWithHeader,
 };
 
 /// Representation of a file table segment
-pub struct FileTableSegment {
+pub(crate) struct FileTableSegment {
     /// Address of the next segment inside the archive
     pub next_segment_addr: Option<u64>,
 
@@ -24,67 +22,65 @@ impl FileTableSegment {
     /// Decode a raw file table segment
     pub fn decode(
         input: &mut SourceWithHeader<impl ReadableSource>,
-    ) -> Result<(Self, Vec<Diagnostic>)> {
+    ) -> Result<Self, FileTableSegmentDecodingError> {
         // Only there to ensure at compile time there is only one possible version
         ensure_only_one_version!(input.header.version);
 
-        let next_segment_addr = input.source.consume_next_value::<u64>()?;
+        let next_segment_addr = input
+            .source
+            .consume_next_value::<u64>()
+            .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
-        let dirs_count = input.source.consume_next_value::<u32>()?;
-        let files_count = input.source.consume_next_value::<u32>()?;
+        let dirs_count = input
+            .source
+            .consume_next_value::<u32>()
+            .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
-        let mut diagnostics = Vec::new();
+        let files_count = input
+            .source
+            .consume_next_value::<u32>()
+            .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
         let dirs = (0..dirs_count)
             .map(|_| {
-                input.source.position().and_then(|ft_entry_addr| {
-                    Directory::consume_from_reader(input).map(|entry| {
-                        entry.and_then(|dir| {
-                            dir.map_err(|err| {
-                                diagnostics.push(Diagnostic::InvalidItemName {
-                                    is_dir: true,
-                                    ft_entry_addr,
-                                    error: err,
-                                });
-                            })
-                            .ok()
+                input
+                    .source
+                    .position()
+                    .map_err(FileTableSegmentDecodingError::IoError)
+                    .and_then(|ft_entry_addr| {
+                        Directory::consume_from_reader(input).map_err(|err| {
+                            FileTableSegmentDecodingError::InvalidDirectoryEntry {
+                                ft_entry_addr,
+                                err,
+                            }
                         })
                     })
-                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         let files = (0..files_count)
             .map(|_| {
-                input.source.position().and_then(|ft_entry_addr| {
-                    File::consume_from_reader(input).map(|entry| {
-                        entry.and_then(|file| {
-                            file.map_err(|err| {
-                                diagnostics.push(Diagnostic::InvalidItemName {
-                                    is_dir: false,
-                                    ft_entry_addr,
-                                    error: err,
-                                });
-                            })
-                            .ok()
+                input
+                    .source
+                    .position()
+                    .map_err(FileTableSegmentDecodingError::IoError)
+                    .and_then(|ft_entry_addr| {
+                        File::consume_from_reader(input).map_err(|err| {
+                            FileTableSegmentDecodingError::InvalidFileEntry { ft_entry_addr, err }
                         })
                     })
-                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok((
-            Self {
-                next_segment_addr: match next_segment_addr {
-                    0 => None,
-                    _ => Some(next_segment_addr),
-                },
-
-                dirs,
-                files,
+        Ok(Self {
+            next_segment_addr: match next_segment_addr {
+                0 => None,
+                _ => Some(next_segment_addr),
             },
-            diagnostics,
-        ))
+
+            dirs,
+            files,
+        })
     }
 
     /// Encode a raw file segment
@@ -104,14 +100,14 @@ impl FileTableSegment {
         for dir in dirs {
             bytes.extend(match dir {
                 Some(dir) => dir.encode(),
-                None => vec![0; usize::try_from(DIRECTORY_ENTRY_SIZE).unwrap()],
+                None => vec![0; DIRECTORY_ENTRY_SIZE],
             });
         }
 
         for file in files {
             bytes.extend(match file {
                 Some(file) => file.encode(),
-                None => vec![0; usize::try_from(FILE_ENTRY_SIZE).unwrap()],
+                None => vec![0; FILE_ENTRY_SIZE],
             });
         }
 
@@ -121,14 +117,14 @@ impl FileTableSegment {
     pub fn dir_entry_offset(&self, index: u32) -> u64 {
         assert!(index < u32::try_from(self.dirs.len()).unwrap());
 
-        16 + u64::from(index) * DIRECTORY_ENTRY_SIZE
+        16 + u64::from(index) * (DIRECTORY_ENTRY_SIZE as u64)
     }
 
     pub fn file_entry_offset(&self, index: u32) -> u64 {
         assert!(index < u32::try_from(self.files.len()).unwrap());
 
-        16 + (u64::try_from(self.dirs.len()).unwrap() * DIRECTORY_ENTRY_SIZE)
-            + (u64::from(index) * FILE_ENTRY_SIZE)
+        16 + (u64::try_from(self.dirs.len()).unwrap() * (DIRECTORY_ENTRY_SIZE as u64))
+            + (u64::from(index) * (FILE_ENTRY_SIZE as u64))
     }
 
     pub fn dirs(&self) -> &[Option<Directory>] {
@@ -142,15 +138,34 @@ impl FileTableSegment {
     pub fn consume_next_segment(
         &self,
         input: &mut SourceWithHeader<impl ReadableSource>,
-    ) -> Option<Result<(u64, Self, Vec<Diagnostic>)>> {
+    ) -> Option<Result<(u64, Self), FileTableSegmentDecodingError>> {
         self.next_segment_addr.map(|addr| {
-            input.source.set_position(addr)?;
-            Self::decode(input).map(|(segment, diags)| (addr, segment, diags))
+            input
+                .source
+                .set_position(addr)
+                .map_err(FileTableSegmentDecodingError::IoError)?;
+
+            Self::decode(input).map(|segment| (addr, segment))
         })
     }
 
     pub fn encoded_len(&self) -> u64 {
-        16 + u64::try_from(self.dirs.len()).unwrap() * DIRECTORY_ENTRY_SIZE
-            + u64::try_from(self.files.len()).unwrap() * FILE_ENTRY_SIZE
+        16 + u64::try_from(self.dirs.len()).unwrap() * u64::try_from(DIRECTORY_ENTRY_SIZE).unwrap()
+            + u64::try_from(self.files.len()).unwrap() * (FILE_ENTRY_SIZE as u64)
     }
+}
+
+#[derive(Debug)]
+pub enum FileTableSegmentDecodingError {
+    // TODO: add context
+    InvalidHeader(anyhow::Error),
+    IoError(anyhow::Error),
+    InvalidDirectoryEntry {
+        ft_entry_addr: u64,
+        err: DirectoryDecodingError,
+    },
+    InvalidFileEntry {
+        ft_entry_addr: u64,
+        err: FileDecodingError,
+    },
 }

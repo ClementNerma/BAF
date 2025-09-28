@@ -1,6 +1,9 @@
 use baf::{
     archive::Archive,
-    data::{directory::Directory, file::File},
+    data::{
+        directory::{Directory, DirectoryId, DirectoryIdOrRoot},
+        file::File,
+    },
     source::ReadableSource,
 };
 
@@ -18,8 +21,10 @@ impl Tree {
         Self::_new(vec![], dirs.as_slice(), files.as_slice())
     }
 
-    fn _new(path: Vec<(u64, String)>, dirs: &[&Directory], files: &[&File]) -> Self {
-        let dir_id = path.last().map(|(id, _)| *id);
+    fn _new(path: Vec<(DirectoryId, String)>, dirs: &[&Directory], files: &[&File]) -> Self {
+        let dir_id = path.last().map_or(DirectoryIdOrRoot::Root, |(id, _)| {
+            DirectoryIdOrRoot::NonRoot(*id)
+        });
 
         Self {
             path: path.iter().map(|(_, name)| name.clone()).collect(),

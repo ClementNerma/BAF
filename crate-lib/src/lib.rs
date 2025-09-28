@@ -11,7 +11,6 @@
 pub mod archive;
 pub mod config;
 pub mod data;
-pub mod diagnostic;
 pub mod easy;
 pub mod file_reader;
 pub mod source;

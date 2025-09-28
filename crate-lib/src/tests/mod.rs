@@ -1,4 +1,4 @@
-use std::{io::Read, ops::Deref};
+use std::{io::Read, num::NonZero, ops::Deref};
 
 use anyhow::{Context, Result};
 
@@ -8,7 +8,12 @@ use crate::{
     archive::{Archive, DirEntry},
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
-    data::{name::ItemName, timestamp::Timestamp},
+    data::{
+        directory::{DirectoryId, DirectoryIdOrRoot},
+        file::FileId,
+        name::ItemName,
+        timestamp::Timestamp,
+    },
     source::{InMemoryData, RealFile, WritableSource},
 };
 
@@ -32,7 +37,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
 
     let directory_id = archive
         .create_directory(
-            None,
+            DirectoryIdOrRoot::Root,
             ItemName::new("dir".to_owned()).unwrap(),
             Timestamp::now(),
         )
@@ -40,7 +45,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
 
     let file_id = archive
         .create_file(
-            Some(directory_id),
+            DirectoryIdOrRoot::NonRoot(directory_id),
             ItemName::new("file".to_owned()).unwrap(),
             Timestamp::now(),
             InMemoryData::from_data(FILE_CONTENT.to_vec()),
@@ -60,7 +65,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
 
     {
         let file = archive.create_file(
-            None,
+            DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
             InMemoryData::new(),
@@ -68,7 +73,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
         archive.remove_file(file)?;
 
         let dir = archive.create_directory(
-            None,
+            DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
         )?;
@@ -77,13 +82,13 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
 
     {
         let dir = archive.create_directory(
-            None,
+            DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
         )?;
 
         archive.create_file(
-            Some(dir),
+            DirectoryIdOrRoot::NonRoot(dir),
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
             InMemoryData::new(),
@@ -95,7 +100,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     let source = archive.close();
 
     // Open archive
-    let (mut archive, _) = Archive::open(source, ArchiveConfig::default()).unwrap();
+    let mut archive = Archive::open(source, ArchiveConfig::default()).unwrap();
 
     assert_eq!(archive.dirs().count(), 1);
     assert_eq!(archive.dirs().next().unwrap().name.deref(), "dir_renamed");
@@ -103,19 +108,35 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
     assert_eq!(archive.files().count(), 1);
     assert_eq!(archive.files().next().unwrap().name.deref(), "file_renamed");
 
-    assert_eq!(archive.read_dir(None).unwrap().count(), 1);
+    assert_eq!(
+        archive.read_dir(DirectoryIdOrRoot::Root).unwrap().count(),
+        1
+    );
     assert!(
-        matches!(archive.read_dir(None).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name.deref() == "dir_renamed")
+        matches!(archive.read_dir(DirectoryIdOrRoot::Root).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name.deref() == "dir_renamed")
     );
 
-    assert_eq!(archive.read_dir(Some(1)).unwrap().count(), 1);
+    assert_eq!(
+        archive
+            .read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(
+                NonZero::new(1).unwrap()
+            )))
+            .unwrap()
+            .count(),
+        1
+    );
     assert!(
-        matches!(archive.read_dir(Some(1)).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
+        matches!(archive.read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(NonZero::new(1).unwrap()))).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
-    assert_eq!(archive.read_file_to_vec(2).unwrap(), FILE_CONTENT);
+    assert_eq!(
+        archive
+            .read_file_to_vec(FileId(NonZero::new(2).unwrap()))
+            .unwrap(),
+        FILE_CONTENT
+    );
 
-    let mut file_reader = archive.read_file(2).unwrap();
+    let mut file_reader = archive.read_file(FileId(NonZero::new(2).unwrap())).unwrap();
     let mut file_content = vec![];
 
     assert_eq!(

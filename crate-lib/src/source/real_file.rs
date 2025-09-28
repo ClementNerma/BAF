@@ -104,12 +104,12 @@ impl RealFile<true> {
 }
 
 impl<const WRITABLE: bool> ConsumableSource for RealFile<WRITABLE> {
-    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
+    fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()> {
         self.reader()?
-            .read_exact(&mut buf[0..usize::try_from(bytes).unwrap()])
+            .read_exact(&mut buf[0..bytes])
             .with_context(|| format!("Failed to read {bytes} bytes"))?;
 
-        self.position += bytes;
+        self.position += u64::try_from(bytes).unwrap();
 
         Ok(())
     }

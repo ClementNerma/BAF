@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use crate::{ensure_only_one_version, source::ReadableSource};
 
 pub static MAGIC_NUMBER: &[u8] = b"BASICARC";
-pub static HEADER_SIZE: u64 = 256;
+pub static HEADER_SIZE: usize = 256;
 
 /// Representation of an archive's header
 ///
@@ -31,11 +31,10 @@ impl Header {
 
         ensure_only_one_version!(version);
 
-        let bytes = HEADER_SIZE - source.position()?;
+        let bytes = (HEADER_SIZE as u64) - source.position()?;
 
         let mut buf = [0; 256];
-
-        source.consume_into_buffer(bytes, &mut buf)?;
+        source.consume_into_buffer(usize::try_from(bytes).unwrap(), &mut buf)?;
 
         if buf.iter().any(|b| *b != 0) {
             bail!("Rest of the header is not filled with zeroes");

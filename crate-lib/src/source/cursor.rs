@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use super::{ConsumableSource, ReadableSource};
 
 impl<T: AsRef<[u8]>> ConsumableSource for Cursor<T> {
-    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
-        self.read_exact(&mut buf[0..usize::try_from(bytes).unwrap()])
+    fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()> {
+        self.read_exact(&mut buf[0..bytes])
             .context("Failed to read from inner cursor")
     }
 }

@@ -40,18 +40,17 @@ impl Default for InMemoryData {
 }
 
 impl ConsumableSource for InMemoryData {
-    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
-        if self.position + bytes > self.size() {
+    fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()> {
+        if self.position + u64::try_from(bytes).unwrap() > self.size() {
             bail!("End of input");
         }
 
         let position = usize::try_from(self.position).unwrap();
-        let bytes_usize = usize::try_from(bytes).unwrap();
-        let slice = &self.data[position..position + bytes_usize];
+        let slice = &self.data[position..position + bytes];
 
-        self.position += bytes;
+        self.position += u64::try_from(bytes).unwrap();
 
-        buf[0..bytes_usize].copy_from_slice(slice);
+        buf[0..bytes].copy_from_slice(slice);
 
         Ok(())
     }

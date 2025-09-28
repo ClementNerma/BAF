@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, hash_map::Values};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Values},
+    num::NonZero,
+};
 
 use anyhow::{Context, Result, bail};
 use sha3::{Digest, Sha3_256};
@@ -7,14 +10,16 @@ use crate::{
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
     data::{
-        directory::{DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY, Directory},
-        file::{FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY, File},
-        ft_segment::FileTableSegment,
+        directory::{
+            DIRECTORY_ENTRY_SIZE, DIRECTORY_NAME_OFFSET_IN_ENTRY, Directory, DirectoryId,
+            DirectoryIdOrRoot,
+        },
+        file::{FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY, File, FileId},
+        ft_segment::{FileTableSegment, FileTableSegmentDecodingError},
         header::{HEADER_SIZE, Header},
         name::ItemName,
         timestamp::Timestamp,
     },
-    diagnostic::Diagnostic,
     easy::EasyArchive,
     file_reader::FileReader,
     source::{InMemoryData, ReadableSource, WritableSource},
@@ -31,9 +36,9 @@ pub struct Archive<S: ReadableSource> {
     source: S,
     header: Header,
     file_segments: Vec<FileTableSegment>,
-    dirs: HashMap<u64, Directory>,
-    files: HashMap<u64, File>,
-    names_in_dirs: HashMap<Option<u64>, HashSet<ItemName>>,
+    dirs: HashMap<DirectoryId, Directory>,
+    files: HashMap<FileId, File>,
+    names_in_dirs: HashMap<DirectoryIdOrRoot, HashSet<ItemName>>,
     coverage: Coverage,
 }
 
@@ -43,26 +48,26 @@ impl<S: ReadableSource> Archive<S> {
     /// May return a set of warnings about ill-formed archives
     ///
     /// Will read the entire archive's metadata segments before returning.
-    pub fn open(mut source: S, conf: ArchiveConfig) -> Result<(Self, Vec<Diagnostic>)> {
-        let mut source_with_header = Header::decode(&mut source)?;
+    pub fn open(mut source: S, conf: ArchiveConfig) -> Result<Self, ArchiveDecodingError> {
+        let mut source_with_header =
+            Header::decode(&mut source).map_err(ArchiveDecodingError::InvalidHeader)?;
         let header = source_with_header.header;
 
-        let mut diags = vec![];
-
         let mut file_segments = vec![];
-        let mut file_segments_addr = vec![HEADER_SIZE];
-        let (mut prev_segment, new_diags) = FileTableSegment::decode(&mut source_with_header)?;
-
-        diags.extend(new_diags);
+        let mut file_segments_addr = vec![HEADER_SIZE as u64];
+        let mut prev_segment = FileTableSegment::decode(&mut source_with_header)
+            .map_err(ArchiveDecodingError::InvalidFileTableSegment)?;
 
         while let Some(next_segment) = prev_segment.consume_next_segment(&mut source_with_header) {
+            let next_segment =
+                next_segment.map_err(ArchiveDecodingError::InvalidFileTableSegment)?;
+
             file_segments.push(prev_segment);
 
-            let (segment_addr, segment, new_diags) = next_segment?;
+            let (segment_addr, segment) = next_segment;
+
             file_segments_addr.push(segment_addr);
             prev_segment = segment;
-
-            diags.extend(new_diags);
         }
 
         file_segments.push(prev_segment);
@@ -72,7 +77,7 @@ impl<S: ReadableSource> Archive<S> {
                 .iter()
                 .enumerate()
                 .map(|(i, segment)| (*file_segments_addr.get(i).unwrap(), segment)),
-            source.len()?,
+            source.len().map_err(ArchiveDecodingError::IoError)?,
         );
 
         let dirs = file_segments
@@ -89,21 +94,19 @@ impl<S: ReadableSource> Archive<S> {
             .map(|file| (file.id, file.clone()))
             .collect();
 
-        let names_in_dirs = Self::compute_names_in_dirs(&file_segments, &mut diags);
+        let names_in_dirs = Self::compute_names_in_dirs(&file_segments)
+            .map_err(ArchiveDecodingError::DuplicateItemNames)?;
 
-        Ok((
-            Self {
-                source,
-                conf,
-                header,
-                names_in_dirs,
-                files,
-                dirs,
-                file_segments,
-                coverage,
-            },
-            diags,
-        ))
+        Ok(Self {
+            source,
+            conf,
+            header,
+            names_in_dirs,
+            files,
+            dirs,
+            file_segments,
+            coverage,
+        })
     }
 
     /// Get an [`EasyArchive`] abstraction for easier handling of this archive.
@@ -122,22 +125,22 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get the list of all directories contained inside the archive
-    pub fn dirs(&self) -> Values<'_, u64, Directory> {
+    pub fn dirs(&self) -> Values<'_, DirectoryId, Directory> {
         self.dirs.values()
     }
 
     /// Get the list of all files contained inside the archive
-    pub fn files(&self) -> Values<'_, u64, File> {
+    pub fn files(&self) -> Values<'_, FileId, File> {
         self.files.values()
     }
 
     /// Get informations about a directory from the archive
-    pub fn get_dir(&self, id: u64) -> Option<&Directory> {
+    pub fn get_dir(&self, id: DirectoryId) -> Option<&Directory> {
         self.dirs.get(&id)
     }
 
     /// Get informations about a file from the archive
-    pub fn get_file(&self, id: u64) -> Option<&File> {
+    pub fn get_file(&self, id: FileId) -> Option<&File> {
         self.files.get(&id)
     }
 
@@ -145,7 +148,7 @@ impl<S: ReadableSource> Archive<S> {
         assert!(segment_index < self.file_segments.len());
 
         if segment_index == 0 {
-            HEADER_SIZE
+            HEADER_SIZE as u64
         } else {
             self.file_segments[segment_index - 1]
                 .next_segment_addr
@@ -154,9 +157,14 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Iterate over all items inside a directory contained inside the archive
-    pub fn read_dir(&self, id: Option<u64>) -> Option<impl Iterator<Item = DirEntry<'_>>> {
-        if id.is_some_and(|id| !self.dirs.contains_key(&id)) {
-            return None;
+    pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Option<impl Iterator<Item = DirEntry<'_>>> {
+        match id {
+            DirectoryIdOrRoot::Root => {}
+            DirectoryIdOrRoot::NonRoot(id) => {
+                if !self.dirs.contains_key(&id) {
+                    return None;
+                }
+            }
         }
 
         // TODO: optimize to not require a filter over ALL directories
@@ -177,7 +185,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
-    pub fn read_file(&mut self, id: u64) -> Result<FileReader<'_, S>> {
+    pub fn read_file(&mut self, id: FileId) -> Result<FileReader<'_, S>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
         self.source.set_position(file.content_addr)?;
@@ -190,12 +198,20 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get the content of a file contained inside the archive into a vector of bytes
-    pub fn read_file_to_vec(&mut self, id: u64) -> Result<Vec<u8>> {
+    pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
         let file = self.files.get(&id).context("File not found in archive")?;
 
         self.source.set_position(file.content_addr)?;
 
-        let bytes = self.source.consume_into_vec(file.content_len)?;
+        let file_len = usize::try_from(file.content_len).with_context(|| {
+            format!(
+                "Cannot read more than {} bytes into a Vec<>, found {}",
+                usize::MAX,
+                file.content_len
+            )
+        })?;
+
+        let bytes = self.source.consume_into_vec(file_len)?;
 
         let mut hash = Sha3_256::new();
         hash.update(&bytes);
@@ -212,16 +228,17 @@ impl<S: ReadableSource> Archive<S> {
         Ok(bytes)
     }
 
-    fn get_item_entry(&self, id: u64, item_type: ItemType) -> Result<SegmentEntry> {
+    fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
         self.file_segments
             .iter()
             .enumerate()
             .find_map(|(segment_index, segment)| {
-                let entry_index = match item_type {
-                    ItemType::Directory => {
+                let entry_index = match item_id {
+                    ItemId::Directory(id) => {
                         segment.dirs.iter().flatten().position(|dir| dir.id == id)
                     }
-                    ItemType::File => segment
+
+                    ItemId::File(id) => segment
                         .files
                         .iter()
                         .flatten()
@@ -235,16 +252,16 @@ impl<S: ReadableSource> Archive<S> {
                         segment_index,
                         entry_index,
                         entry_addr: self.segment_addr(segment_index)
-                            + match item_type {
-                                ItemType::Directory => segment.dir_entry_offset(entry_index_u32),
-                                ItemType::File => segment.file_entry_offset(entry_index_u32),
+                            + match item_id {
+                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32),
+                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32),
                             },
                     }
                 })
             })
-            .context(match item_type {
-                ItemType::Directory => "Directory not found",
-                ItemType::File => "File not found",
+            .context(match item_id {
+                ItemId::Directory(_) => "Directory not found",
+                ItemId::File(_) => "File not found",
             })
     }
 
@@ -253,7 +270,7 @@ impl<S: ReadableSource> Archive<S> {
         len: u64,
     ) -> Coverage {
         let mut coverage = Coverage::new(len);
-        coverage.mark_as_used(0, HEADER_SIZE);
+        coverage.mark_as_used(0, HEADER_SIZE as u64);
 
         for (segment_addr, segment) in file_segments.into_iter() {
             coverage.mark_as_used(segment_addr, segment.encoded_len());
@@ -268,9 +285,11 @@ impl<S: ReadableSource> Archive<S> {
 
     fn compute_names_in_dirs<'a>(
         file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
-        diags: &mut Vec<Diagnostic>,
-    ) -> HashMap<Option<u64>, HashSet<ItemName>> {
-        let mut names_in_dirs = HashMap::from([(None, HashSet::new())]);
+    ) -> Result<HashMap<DirectoryIdOrRoot, HashSet<ItemName>>, Vec<ArchiveDuplicateItemNameError>>
+    {
+        let mut names_in_dirs = HashMap::from([(DirectoryIdOrRoot::Root, HashSet::new())]);
+
+        let mut errors = vec![];
 
         for segment in file_segments {
             for dir in segment.dirs().iter().flatten() {
@@ -279,15 +298,18 @@ impl<S: ReadableSource> Archive<S> {
                     .or_default()
                     .insert(dir.name.clone())
                 {
-                    diags.push(Diagnostic::ItemHasDuplicateName {
-                        is_dir: true,
-                        item_id: dir.id,
-                        parent_dir_id: dir.parent_dir,
+                    errors.push(ArchiveDuplicateItemNameError {
+                        id: ItemId::Directory(dir.id),
+                        parent_dir: dir.parent_dir,
                         name: dir.name.clone(),
                     });
                 }
 
-                assert!(names_in_dirs.insert(Some(dir.id), HashSet::new()).is_none());
+                assert!(
+                    names_in_dirs
+                        .insert(DirectoryIdOrRoot::NonRoot(dir.id), HashSet::new())
+                        .is_none()
+                );
             }
 
             for file in segment.files().iter().flatten() {
@@ -296,17 +318,20 @@ impl<S: ReadableSource> Archive<S> {
                     .or_default()
                     .insert(file.name.clone())
                 {
-                    diags.push(Diagnostic::ItemHasDuplicateName {
-                        is_dir: false,
-                        item_id: file.id,
-                        parent_dir_id: file.parent_dir,
+                    errors.push(ArchiveDuplicateItemNameError {
+                        id: ItemId::File(file.id),
+                        parent_dir: file.parent_dir,
                         name: file.name.clone(),
                     });
                 }
             }
         }
 
-        names_in_dirs
+        if errors.is_empty() {
+            Ok(names_in_dirs)
+        } else {
+            Err(errors)
+        }
     }
 }
 
@@ -343,8 +368,8 @@ impl<S: WritableSource> Archive<S> {
         Ok(Self {
             conf,
             header,
-            coverage: Self::compute_coverage([(HEADER_SIZE, &segment)], source.len()?),
-            names_in_dirs: Self::compute_names_in_dirs([&segment], &mut vec![]),
+            coverage: Self::compute_coverage([((HEADER_SIZE as u64), &segment)], source.len()?),
+            names_in_dirs: Self::compute_names_in_dirs([&segment]).unwrap(),
             source,
             file_segments: vec![segment],
             dirs: HashMap::new(),
@@ -352,6 +377,7 @@ impl<S: WritableSource> Archive<S> {
         })
     }
 
+    /// Write some data (file table segment, file content, etc.) wherever there is some free space
     fn write_data_where_possible(
         &mut self,
         mut data: impl ReadableSource,
@@ -369,12 +395,16 @@ impl<S: WritableSource> Archive<S> {
         let mut checksum = Sha3_256::new();
         let mut written = 0;
 
-        while written < len {
-            let mut buf = [0; 4096];
-            let len = 4096.min(len - written);
-            data.consume_into_buffer(len, &mut buf)?;
+        // Progressively write the data using 4KB chunks and compute the checksum in the meantime
+        const CHUNK_SIZE: usize = 4096;
 
-            let data = &buf[0..usize::try_from(len).unwrap()];
+        while written < len {
+            let mut buf = [0; CHUNK_SIZE];
+            let len = (CHUNK_SIZE as u64).min(len - written);
+            let len_usize = usize::try_from(len).unwrap();
+            data.consume_into_buffer(len_usize, &mut buf)?;
+
+            let data = &buf[0..len_usize];
 
             self.source.write_all(data)?;
             written += len;
@@ -481,7 +511,7 @@ impl<S: WritableSource> Archive<S> {
         }
     }
 
-    fn ensure_no_duplicate_name(&self, name: &str, parent_dir: Option<u64>) -> Result<()> {
+    fn ensure_no_duplicate_name(&self, name: &str, parent_dir: DirectoryIdOrRoot) -> Result<()> {
         match self.names_in_dirs.get(&parent_dir) {
             Some(names_in_parent_dir) => {
                 if !names_in_parent_dir.contains(name) {
@@ -490,8 +520,9 @@ impl<S: WritableSource> Archive<S> {
                     bail!(
                         "Name '{name}' is already used in {}",
                         match parent_dir {
-                            Some(id) => format!("parent directory with ID {id}"),
-                            None => "root directory".to_owned(),
+                            DirectoryIdOrRoot::Root => "root directory".to_owned(),
+                            DirectoryIdOrRoot::NonRoot(id) =>
+                                format!("parent directory with ID {id:?}",),
                         }
                     );
                 }
@@ -506,10 +537,10 @@ impl<S: WritableSource> Archive<S> {
     /// Modification time is in seconds since Unix' Epoch
     pub fn create_directory(
         &mut self,
-        parent_dir: Option<u64>,
+        parent_dir: DirectoryIdOrRoot,
         name: ItemName,
         modif_time: Timestamp,
-    ) -> Result<u64> {
+    ) -> Result<DirectoryId> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         let SegmentEntry {
@@ -521,9 +552,11 @@ impl<S: WritableSource> Archive<S> {
         let id = self
             .dirs
             .keys()
-            .chain(self.files.keys())
-            .max()
-            .map_or(1, |max| max + 1);
+            .map(|id| id.inner())
+            .chain(self.files.keys().map(|id| id.inner()))
+            .max();
+
+        let id = DirectoryId(NonZero::new(id.map_or(1, |max| max.get() + 1)).unwrap());
 
         let directory = Directory {
             id,
@@ -547,7 +580,7 @@ impl<S: WritableSource> Archive<S> {
         // Create names listing for this directory
         assert!(
             self.names_in_dirs
-                .insert(Some(id), HashSet::new())
+                .insert(DirectoryIdOrRoot::NonRoot(id), HashSet::new())
                 .is_none()
         );
 
@@ -567,11 +600,11 @@ impl<S: WritableSource> Archive<S> {
     /// Content is provided through a [`crate::source::ReadableSource`]
     pub fn create_file(
         &mut self,
-        parent_dir: Option<u64>,
+        parent_dir: DirectoryIdOrRoot,
         name: ItemName,
         modif_time: Timestamp,
         mut content: impl ReadableSource,
-    ) -> Result<u64> {
+    ) -> Result<FileId> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         let SegmentEntry {
@@ -588,9 +621,11 @@ impl<S: WritableSource> Archive<S> {
         let id = self
             .dirs
             .keys()
-            .chain(self.files.keys())
-            .max()
-            .map_or(1, |max| max + 1);
+            .map(|id| id.inner())
+            .chain(self.files.keys().map(|id| id.inner()))
+            .max();
+
+        let id = FileId(NonZero::new(id.map_or(1, |max| max.get() + 1)).unwrap());
 
         let file = File {
             id,
@@ -628,7 +663,7 @@ impl<S: WritableSource> Archive<S> {
     /// Overwrite an existing file's content and modification time
     pub fn replace_file_content(
         &mut self,
-        id: u64,
+        id: FileId,
         new_modif_time: Timestamp,
         mut new_content: impl ReadableSource,
     ) -> Result<()> {
@@ -637,7 +672,7 @@ impl<S: WritableSource> Archive<S> {
             entry_index,
             entry_addr,
         } = self
-            .get_item_entry(id, ItemType::File)
+            .get_item_entry(ItemId::File(id))
             .context("Provided file ID was not found")?;
 
         let content_len = new_content.len()?;
@@ -675,19 +710,19 @@ impl<S: WritableSource> Archive<S> {
     }
 
     /// Rename a directory
-    pub fn rename_directory(&mut self, id: u64, new_name: ItemName) -> Result<()> {
+    pub fn rename_directory(&mut self, id: DirectoryId, new_name: ItemName) -> Result<()> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(id, ItemType::Directory)?;
+        } = self.get_item_entry(ItemId::Directory(id))?;
 
         let dir = self.dirs.get(&id).unwrap().clone();
 
         self.ensure_no_duplicate_name(&new_name, dir.parent_dir)?;
 
         self.source
-            .set_position(entry_addr + DIRECTORY_NAME_OFFSET_IN_ENTRY)?;
+            .set_position(entry_addr + (DIRECTORY_NAME_OFFSET_IN_ENTRY as u64))?;
 
         self.source.write_all(&new_name.encode())?;
 
@@ -707,19 +742,19 @@ impl<S: WritableSource> Archive<S> {
     }
 
     /// Rename a file
-    pub fn rename_file(&mut self, id: u64, new_name: ItemName) -> Result<()> {
+    pub fn rename_file(&mut self, id: FileId, new_name: ItemName) -> Result<()> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(id, ItemType::File)?;
+        } = self.get_item_entry(ItemId::File(id))?;
 
         let file = self.files.get(&id).unwrap().clone();
 
         self.ensure_no_duplicate_name(&new_name, file.parent_dir)?;
 
         self.source
-            .set_position(entry_addr + FILE_NAME_OFFSET_IN_ENTRY)?;
+            .set_position(entry_addr + (FILE_NAME_OFFSET_IN_ENTRY as u64))?;
 
         self.source.write_all(&new_name.encode())?;
 
@@ -741,18 +776,18 @@ impl<S: WritableSource> Archive<S> {
     /// Remove a directory, recursively
     ///
     /// Returns the removed directory entry
-    pub fn remove_directory(&mut self, id: u64) -> Result<Directory> {
+    pub fn remove_directory(&mut self, id: DirectoryId) -> Result<Directory> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(id, ItemType::Directory)?;
+        } = self.get_item_entry(ItemId::Directory(id))?;
 
         let sub_dirs = self
             .dirs
             .values()
             .filter_map(|dir| {
-                if dir.parent_dir == Some(id) {
+                if dir.parent_dir == DirectoryIdOrRoot::NonRoot(id) {
                     Some(dir.id)
                 } else {
                     None
@@ -764,7 +799,7 @@ impl<S: WritableSource> Archive<S> {
             .files
             .values()
             .filter_map(|file| {
-                if file.parent_dir == Some(id) {
+                if file.parent_dir == DirectoryIdOrRoot::NonRoot(id) {
                     Some(file.id)
                 } else {
                     None
@@ -785,8 +820,7 @@ impl<S: WritableSource> Archive<S> {
         // Remove the directory entry itself
         self.source.set_position(entry_addr)?;
 
-        self.source
-            .write_all(&vec![0; usize::try_from(DIRECTORY_ENTRY_SIZE).unwrap()])?;
+        self.source.write_all(&vec![0; DIRECTORY_ENTRY_SIZE])?;
 
         // Remove from in-memory file segments
         self.file_segments[segment_index].dirs[entry_index]
@@ -804,7 +838,11 @@ impl<S: WritableSource> Archive<S> {
         );
 
         // Remove names listing for this directory
-        let names_in_dir = self.names_in_dirs.remove(&Some(id)).unwrap();
+        let names_in_dir = self
+            .names_in_dirs
+            .remove(&DirectoryIdOrRoot::NonRoot(id))
+            .unwrap();
+
         assert!(names_in_dir.is_empty());
 
         Ok(dir)
@@ -813,18 +851,17 @@ impl<S: WritableSource> Archive<S> {
     /// Remove a file
     ///
     /// Returns the removed file entry
-    pub fn remove_file(&mut self, id: u64) -> Result<File> {
+    pub fn remove_file(&mut self, id: FileId) -> Result<File> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(id, ItemType::File)?;
+        } = self.get_item_entry(ItemId::File(id))?;
 
         // Remove the file entry itself
         self.source.set_position(entry_addr)?;
 
-        self.source
-            .write_all(&vec![0; usize::try_from(FILE_ENTRY_SIZE).unwrap()])?;
+        self.source.write_all(&vec![0; FILE_ENTRY_SIZE])?;
 
         // Remove from in-memory file segments
         self.file_segments[segment_index].files[entry_index]
@@ -864,6 +901,26 @@ impl<S: WritableSource> Archive<S> {
 }
 
 #[derive(Debug)]
+pub enum ArchiveDecodingError {
+    IoError(anyhow::Error),
+    DuplicateItemNames(Vec<ArchiveDuplicateItemNameError>),
+    InvalidHeader(anyhow::Error),
+    InvalidFileTableSegment(FileTableSegmentDecodingError),
+}
+
+#[derive(Debug)]
+pub struct ArchiveDuplicateItemNameError {
+    pub id: ItemId,
+    pub parent_dir: DirectoryIdOrRoot,
+    pub name: ItemName,
+}
+
+#[derive(Debug)]
+pub enum ItemId {
+    Directory(DirectoryId),
+    File(FileId),
+}
+
 enum ItemType {
     Directory,
     File,
@@ -883,13 +940,6 @@ pub enum DirEntry<'a> {
 }
 
 impl<'a> DirEntry<'a> {
-    pub fn id(&self) -> u64 {
-        match self {
-            DirEntry::Directory(dir) => dir.id,
-            DirEntry::File(file) => file.id,
-        }
-    }
-
     pub fn name(&self) -> &ItemName {
         match self {
             DirEntry::Directory(dir) => &dir.name,

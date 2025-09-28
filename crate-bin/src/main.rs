@@ -9,7 +9,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use baf::{
     config::ArchiveConfig,
     data::{file::File, timestamp::Timestamp},
@@ -51,12 +51,8 @@ fn inner_main() -> Result<()> {
         }
 
         Action::List => {
-            let (archive, diags) = EasyArchive::open_from_file(path, ArchiveConfig::default())
-                .context("Failed to open archive")?;
-
-            for diag in diags {
-                eprintln!("WARNING: {diag}");
-            }
+            let archive = EasyArchive::open_from_file(path, ArchiveConfig::default())
+                .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
             let tree = Tree::new(archive.inner());
 
@@ -102,16 +98,12 @@ fn inner_main() -> Result<()> {
             let config = ArchiveConfig::default();
 
             let mut archive = if path.exists() {
-                let (archive, diags) =
-                    EasyArchive::open_from_file(&path, config).with_context(|| {
-                        format!("Failed to open archive at path '{}'", path.display())
-                    })?;
-
-                for diag in diags {
-                    eprintln!("WARNING: {diag}");
-                }
-
-                archive
+                EasyArchive::open_from_file(&path, config).map_err(|err| {
+                    anyhow!(
+                        "Failed to open archive at path '{}': {err:?}",
+                        path.display()
+                    ) // TODO: display instead of debug
+                })?
             } else {
                 EasyArchive::create_as_file(&path, config).with_context(|| {
                     format!("Failed to create archive at path '{}'", path.display())

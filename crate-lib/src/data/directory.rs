@@ -1,6 +1,11 @@
+use std::num::NonZero;
+
 use anyhow::Result;
 
-use crate::{ensure_only_one_version, source::ReadableSource};
+use crate::{
+    ensure_only_one_version,
+    source::{FromSourceBytes, ReadableSource},
+};
 
 use super::{
     header::SourceWithHeader,
@@ -8,17 +13,17 @@ use super::{
     timestamp::Timestamp,
 };
 
-pub static DIRECTORY_ENTRY_SIZE: u64 = 280;
-pub static DIRECTORY_NAME_OFFSET_IN_ENTRY: u64 = 16;
+pub static DIRECTORY_ENTRY_SIZE: usize = 280;
+pub static DIRECTORY_NAME_OFFSET_IN_ENTRY: usize = 16;
 
 /// Representation of a directory inside an archive
 #[derive(Debug, Clone)]
 pub struct Directory {
     /// Unique identifier (in the archive)
-    pub id: u64,
+    pub id: DirectoryId,
 
     /// Unique identifier of the parent directory
-    pub parent_dir: Option<u64>,
+    pub parent_dir: DirectoryIdOrRoot,
 
     /// Name of the file (must be valid UTF-8)
     pub name: ItemName,
@@ -29,34 +34,46 @@ pub struct Directory {
 
 impl Directory {
     /// Decode a raw directory entry from an archive
-    pub fn consume_from_reader(
+    pub(crate) fn consume_from_reader(
         input: &mut SourceWithHeader<impl ReadableSource>,
-    ) -> Result<Option<Result<Self, NameDecodingError>>> {
+    ) -> Result<Option<Self>, DirectoryDecodingError> {
         ensure_only_one_version!(input.header.version);
 
-        let id = input.source.consume_next_value()?;
-        let parent_dir = input.source.consume_next_value()?;
-        let name = ItemName::consume_from_reader(input.source)?;
-        let modif_time = input.source.consume_next_value()?;
+        let id = input
+            .source
+            .consume_next_value::<u64>()
+            .map_err(DirectoryDecodingError::InvalidEntry)?;
 
-        if id == 0 {
+        // If an entry starts with a zero, it means its empty
+        let Some(id) = NonZero::new(id) else {
+            input
+                .source
+                .advance(DIRECTORY_ENTRY_SIZE - 8)
+                .map_err(DirectoryDecodingError::IoError)?;
+
             return Ok(None);
-        }
-
-        let dir = Self {
-            id,
-            parent_dir: match parent_dir {
-                0 => None,
-                _ => Some(parent_dir),
-            },
-            name: match name {
-                Ok(name) => name,
-                Err(err) => return Ok(Some(Err(err))),
-            },
-            modif_time,
         };
 
-        Ok(if id != 0 { Some(Ok(dir)) } else { None })
+        let parent_dir = input
+            .source
+            .consume_next_value()
+            .map_err(DirectoryDecodingError::InvalidEntry)?;
+
+        let name = ItemName::consume_from_reader(input.source)
+            .map_err(DirectoryDecodingError::InvalidEntry)?
+            .map_err(DirectoryDecodingError::InvalidName)?;
+
+        let modif_time = input
+            .source
+            .consume_next_value()
+            .map_err(DirectoryDecodingError::InvalidEntry)?;
+
+        Ok(Some(Self {
+            id: DirectoryId(id),
+            parent_dir,
+            name,
+            modif_time,
+        }))
     }
 
     /// Encode as a raw directory entry
@@ -70,19 +87,58 @@ impl Directory {
 
         let mut bytes = vec![];
 
-        bytes.extend(id.to_le_bytes());
-        bytes.extend(parent_dir.unwrap_or(0).to_le_bytes());
+        bytes.extend(id.inner().get().to_le_bytes());
+        bytes.extend(
+            match parent_dir {
+                DirectoryIdOrRoot::Root => 0,
+                DirectoryIdOrRoot::NonRoot(directory_id) => directory_id.inner().get(),
+            }
+            .to_le_bytes(),
+        );
         bytes.extend(name.encode());
         bytes.extend(modif_time.encode());
 
-        assert_eq!(u64::try_from(bytes.len()).unwrap(), DIRECTORY_ENTRY_SIZE);
+        assert_eq!(bytes.len(), DIRECTORY_ENTRY_SIZE);
 
         bytes
     }
 }
 
-pub struct DirectoryNameDecodingError {
-    pub dir_id: u64,
-    pub ft_entry_addr: u64,
-    pub error: NameDecodingError,
+// TODO: docs
+#[derive(Debug)]
+pub enum DirectoryDecodingError {
+    IoError(anyhow::Error),
+    InvalidEntry(anyhow::Error),
+    InvalidName(NameDecodingError),
+}
+
+/// ID of a directory, unique inside a given archive
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct DirectoryId(pub(crate) NonZero<u64>);
+
+impl DirectoryId {
+    pub(crate) fn inner(&self) -> NonZero<u64> {
+        self.0
+    }
+}
+
+/// ID of a directory, unique inside a given archive
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum DirectoryIdOrRoot {
+    Root,
+    NonRoot(DirectoryId),
+}
+
+impl FromSourceBytes for DirectoryIdOrRoot {
+    fn decode(source: &mut impl crate::source::ConsumableSource) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let id = source.consume_next_value::<u64>()?;
+
+        Ok(match NonZero::new(id) {
+            None => Self::Root,
+            Some(id) => Self::NonRoot(DirectoryId(id)),
+        })
+    }
 }

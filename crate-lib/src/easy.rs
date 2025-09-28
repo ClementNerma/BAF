@@ -3,10 +3,14 @@ use std::{path::Path, time::SystemTime};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::{
-    archive::{Archive, DirEntry},
+    archive::{Archive, ArchiveDecodingError, DirEntry},
     config::ArchiveConfig,
-    data::{directory::Directory, file::File, path::PathInArchive, timestamp::Timestamp},
-    diagnostic::Diagnostic,
+    data::{
+        directory::{Directory, DirectoryId, DirectoryIdOrRoot},
+        file::File,
+        path::PathInArchive,
+        timestamp::Timestamp,
+    },
     file_reader::FileReader,
     source::{ReadableSource, ReadonlyFile, RealFile, WritableSource, WriteableFile},
 };
@@ -43,20 +47,25 @@ impl<S: ReadableSource> EasyArchive<S> {
 
     /// Get the item located the provided path
     pub fn get_item_at(&self, path: &str) -> Option<DirEntry<'_>> {
-        let mut curr_item = None::<DirEntry>;
+        let mut curr_dir_entry = None::<DirEntry>;
 
         for segment in PathInArchive::new(path).ok()?.components() {
-            let curr_id = curr_item.map(|item| item.id());
+            let mut dir_entries = match curr_dir_entry {
+                None => self.archive.read_dir(DirectoryIdOrRoot::Root)?,
 
-            let new_item = self
-                .archive
-                .read_dir(curr_id)?
-                .find(|item| item.name() == segment)?;
+                Some(id) => match id {
+                    DirEntry::Directory(directory) => self
+                        .archive
+                        .read_dir(DirectoryIdOrRoot::NonRoot(directory.id))?,
 
-            curr_item = Some(new_item);
+                    DirEntry::File(_) => return None,
+                },
+            };
+
+            curr_dir_entry = Some(dir_entries.find(|item| item.name() == segment)?);
         }
 
-        curr_item
+        curr_dir_entry
     }
 
     /// Check if an item exists
@@ -87,7 +96,11 @@ impl<S: ReadableSource> EasyArchive<S> {
     /// Iterate over a directory's items
     pub fn read_dir(&self, path: &str) -> Option<impl Iterator<Item = DirEntry<'_>>> {
         let dir = self.get_directory(path)?;
-        Some(self.archive.read_dir(Some(dir.id)).unwrap())
+        Some(
+            self.archive
+                .read_dir(DirectoryIdOrRoot::NonRoot(dir.id))
+                .unwrap(),
+        )
     }
 }
 
@@ -103,7 +116,9 @@ impl<S: WritableSource> EasyArchive<S> {
             .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
 
         for segment in validated_path.components() {
-            let curr_id = curr_dir.map(|item| item.id);
+            let curr_id = curr_dir
+                .map(|item| DirectoryIdOrRoot::NonRoot(item.id))
+                .unwrap_or(DirectoryIdOrRoot::Root);
 
             let item = self
                 .archive
@@ -135,16 +150,16 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 
     /// Create a directory
-    pub fn create_directory(&mut self, path: &str, modif_time: Timestamp) -> Result<u64> {
+    pub fn create_directory(&mut self, path: &str, modif_time: Timestamp) -> Result<DirectoryId> {
         let mut path = PathInArchive::new(path)
             .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
 
         let filename = path.pop().context("Path cannot be empty")?;
 
         let parent_dir = if path.is_empty() {
-            None
+            DirectoryIdOrRoot::Root
         } else {
-            Some(self.get_or_create_dir(&path.to_string())?.id)
+            DirectoryIdOrRoot::NonRoot(self.get_or_create_dir(&path.to_string())?.id)
         };
 
         self.archive
@@ -171,9 +186,9 @@ impl<S: WritableSource> EasyArchive<S> {
         let filename = path.pop().context("Path cannot be empty")?;
 
         let parent_dir = if path.is_empty() {
-            None
+            DirectoryIdOrRoot::Root
         } else {
-            Some(self.get_or_create_dir(&path.to_string())?.id)
+            DirectoryIdOrRoot::NonRoot(self.get_or_create_dir(&path.to_string())?.id)
         };
 
         self.archive
@@ -262,11 +277,12 @@ impl EasyArchive<ReadonlyFile> {
     pub fn open_from_file_readonly(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
-    ) -> Result<(Self, Vec<Diagnostic>)> {
+    ) -> Result<Self, ArchiveDecodingError> {
         let file = RealFile::open_readonly(&path)
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
+            .map_err(ArchiveDecodingError::IoError)?;
 
-        Archive::open(file, conf).map(|(ar, diags)| (ar.easy(), diags))
+        Archive::open(file, conf).map(EasyArchive::new)
     }
 }
 
@@ -275,11 +291,12 @@ impl EasyArchive<WriteableFile> {
     pub fn open_from_file(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
-    ) -> Result<(Self, Vec<Diagnostic>)> {
+    ) -> Result<Self, ArchiveDecodingError> {
         let file = RealFile::open(&path)
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
+            .map_err(ArchiveDecodingError::IoError)?;
 
-        Archive::open(file, conf).map(|(ar, diags)| (ar.easy(), diags))
+        Archive::open(file, conf).map(EasyArchive::new)
     }
 
     /// Create an archive into a file

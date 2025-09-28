@@ -17,9 +17,9 @@ impl<T: Read + Seek> SeekWrapper<T> {
 }
 
 impl<T: Read + Seek> ConsumableSource for SeekWrapper<T> {
-    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()> {
+    fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()> {
         self.reader
-            .read_exact(&mut buf[0..usize::try_from(bytes).unwrap()])
+            .read_exact(&mut buf[0..bytes])
             .context("Failed to read from BufReader")
     }
 }

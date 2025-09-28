@@ -31,12 +31,13 @@ impl<'a, S: ReadableSource> FileReader<'a, S> {
 
 impl<'a, S: ReadableSource> Read for FileReader<'a, S> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // TODO: some typecasts are unneeded in this function
         let read_len = std::cmp::min(u64::try_from(buf.len()).unwrap(), self.len - self.pos);
         let read_len_usize = usize::try_from(read_len).unwrap();
 
         let bytes = self
             .source
-            .consume_into_vec(read_len)
+            .consume_into_vec(usize::try_from(read_len).unwrap())
             .map_err(|err| Error::other(format!("{err:?}")))?;
 
         buf[0..read_len_usize].copy_from_slice(&bytes);

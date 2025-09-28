@@ -7,13 +7,15 @@ mod in_memory;
 mod real_file;
 mod seekables;
 
+use std::num::{NonZero, NonZeroU64};
+
 pub use self::{
     in_memory::InMemoryData,
     real_file::{ReadonlyFile, RealFile, WriteableFile},
     seekables::SeekWrapper,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 /// A source that allows consuming data
 ///
@@ -21,22 +23,30 @@ use anyhow::Result;
 pub trait ConsumableSource {
     /// Consume the amount of provided bytes after the current position,
     /// then advance the cursor by the same amount of bytes.
-    fn consume_into_buffer(&mut self, bytes: u64, buf: &mut [u8]) -> Result<()>;
+    fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()>;
+
+    /// Consume precisely n bytes, discard the result
+    fn advance(&mut self, bytes: usize) -> Result<()> {
+        let mut buf = vec![0u8; bytes];
+        self.consume_into_buffer(bytes, &mut buf)?;
+        Ok(())
+    }
 
     /// Consume the amount of provided bytes after the current position,
     /// then advance the cursor by the same amount of bytes.
     fn consume_to_array<const BYTES: usize>(&mut self) -> Result<[u8; BYTES]> {
         let mut buf = [0; BYTES];
-        self.consume_into_buffer(u64::try_from(BYTES).unwrap(), &mut buf)?;
+        self.consume_into_buffer(BYTES, &mut buf)?;
         Ok(buf)
     }
 
     /// Consume the amount of provided bytes after the current position into a vector,
     /// then advance the cursor by the same amount of bytes.
-    fn consume_into_vec(&mut self, bytes: u64) -> Result<Vec<u8>> {
-        let mut vec = vec![0; usize::try_from(bytes).unwrap()];
-        self.consume_into_buffer(bytes, &mut vec)?;
-        Ok(vec)
+    fn consume_into_vec(&mut self, bytes: usize) -> Result<Vec<u8>> {
+        let mut buf = vec![0; bytes];
+        self.consume_into_buffer(bytes, &mut buf)?;
+        assert_eq!(buf.len(), bytes);
+        Ok(buf)
     }
 
     /// Consume a value that will manipulate the source itself
@@ -127,6 +137,16 @@ impl FromSourceBytes for u64 {
         Self: Sized,
     {
         source.consume_to_array::<8>().map(u64::from_le_bytes)
+    }
+}
+
+impl FromSourceBytes for NonZero<u64> {
+    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let num = source.consume_to_array::<8>().map(u64::from_le_bytes)?;
+        NonZeroU64::new(num).context("Integer should be non-zero")
     }
 }
 
