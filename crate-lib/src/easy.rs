@@ -337,7 +337,7 @@ impl<S: WritableSource> EasyArchive<S> {
     ///
     /// * Items are listed in ascending alphabetical order
     /// * Directories are listed before files
-    pub fn iter(&self) -> impl Iterator<Item = IterArchiveItem<'_>> {
+    pub fn iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
         let mut dirs = self.archive.dirs().collect::<Vec<_>>();
 
         let dirs_name = dirs
@@ -388,31 +388,22 @@ impl<S: WritableSource> EasyArchive<S> {
 
         dirs.into_iter()
             .flat_map(move |dir| {
-                [IterArchiveItem::Directory(
-                    self.archive.get_dir(dir.id).unwrap(),
-                )]
-                .into_iter()
-                .chain(
-                    files_by_parent_dir
-                        .remove(&dir.id)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|file_id| {
-                            IterArchiveItem::File(self.archive.get_file(file_id).unwrap())
-                        }),
-                )
+                [DirEntry::Directory(self.archive.get_dir(dir.id).unwrap())]
+                    .into_iter()
+                    .chain(
+                        files_by_parent_dir
+                            .remove(&dir.id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|file_id| DirEntry::File(self.archive.get_file(file_id).unwrap())),
+                    )
             })
             .chain(
                 root_files
                     .into_iter()
-                    .map(|file_id| IterArchiveItem::File(self.archive.get_file(file_id).unwrap())),
+                    .map(|file_id| DirEntry::File(self.archive.get_file(file_id).unwrap())),
             )
     }
-}
-
-pub enum IterArchiveItem<'a> {
-    File(&'a File),
-    Directory(&'a Directory),
 }
 
 impl EasyArchive<ReadonlyFile> {

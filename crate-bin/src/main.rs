@@ -12,9 +12,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{
-    config::ArchiveConfig,
-    data::timestamp::Timestamp,
-    easy::{EasyArchive, IterArchiveItem},
+    archive::DirEntry, config::ArchiveConfig, data::timestamp::Timestamp, easy::EasyArchive,
     source::ReadonlyFile,
 };
 use clap::Parser;
@@ -53,11 +51,11 @@ fn inner_main() -> Result<()> {
 
             for item in archive.iter() {
                 match item {
-                    IterArchiveItem::Directory(directory) => {
+                    DirEntry::Directory(directory) => {
                         println!("[Dir ] {}", archive.compute_dir_path(directory.id).unwrap());
                     }
 
-                    IterArchiveItem::File(file) => {
+                    DirEntry::File(file) => {
                         println!(
                             "[Dir ] {} ({} bytes)",
                             archive.compute_file_path(file.id).unwrap(),
