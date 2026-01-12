@@ -8,6 +8,7 @@ use crate::{
     data::{
         directory::{Directory, DirectoryId, DirectoryIdOrRoot},
         file::{File, FileId},
+        name::ItemName,
         path::PathInArchive,
         timestamp::Timestamp,
     },
@@ -341,7 +342,7 @@ impl<S: WritableSource> EasyArchive<S> {
 
         let dirs_name = dirs
             .iter()
-            .map(|dir| (dir.id, &dir.name))
+            .map(|dir| (dir.id, self.compute_dir_path(dir.id).unwrap()))
             .collect::<HashMap<_, _>>();
 
         dirs.sort_by(|a, b| {
@@ -352,7 +353,7 @@ impl<S: WritableSource> EasyArchive<S> {
                 }
             };
 
-            let b_parent_name = match a.parent_dir {
+            let b_parent_name = match b.parent_dir {
                 DirectoryIdOrRoot::Root => None,
                 DirectoryIdOrRoot::NonRoot(directory_id) => {
                     Some(dirs_name.get(&directory_id).unwrap())
@@ -374,6 +375,15 @@ impl<S: WritableSource> EasyArchive<S> {
                     files_by_parent_dir.entry(parent).or_default().push(file.id)
                 }
             }
+        }
+
+        for files in files_by_parent_dir.values_mut() {
+            files.sort_by(|a, b| {
+                let a = self.archive.get_file(*a).unwrap();
+                let b = self.archive.get_file(*b).unwrap();
+
+                a.name.cmp(&b.name)
+            });
         }
 
         dirs.into_iter()

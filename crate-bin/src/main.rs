@@ -13,20 +13,16 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{
     config::ArchiveConfig,
-    data::{file::File, timestamp::Timestamp},
-    easy::EasyArchive,
+    data::timestamp::Timestamp,
+    easy::{EasyArchive, IterArchiveItem},
     source::ReadonlyFile,
 };
 use clap::Parser;
 use walkdir::WalkDir;
 
-use self::{
-    args::{Action, CmdArgs},
-    tree::{FlattenedEntryDir, Tree},
-};
+use self::args::{Action, CmdArgs};
 
 mod args;
-mod tree;
 
 fn main() -> ExitCode {
     match inner_main() {
@@ -55,33 +51,19 @@ fn inner_main() -> Result<()> {
             let archive = EasyArchive::open_from_file(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            let tree = Tree::new(archive.inner());
+            for item in archive.iter() {
+                match item {
+                    IterArchiveItem::Directory(directory) => {
+                        println!("[Dir ] {}", archive.compute_dir_path(directory.id).unwrap());
+                    }
 
-            let mut flattened = tree.flattened().collect::<Vec<_>>();
-            flattened.sort_by_key(|entry| entry.path);
-
-            for FlattenedEntryDir { path, files } in flattened {
-                let path = PathBuf::from(path.join(std::path::MAIN_SEPARATOR_STR));
-
-                if path.components().count() != 0 {
-                    println!("[Dir ] {}", path.display());
-                }
-
-                for file in files {
-                    let File {
-                        id: _,
-                        parent_dir: _,
-                        name,
-                        modif_time: _,
-                        content_addr: _,
-                        content_len,
-                        sha3_checksum: _,
-                    } = file;
-
-                    println!(
-                        "[File] {} ({content_len} bytes)",
-                        path.join(name.as_ref()).display()
-                    );
+                    IterArchiveItem::File(file) => {
+                        println!(
+                            "[Dir ] {} ({} bytes)",
+                            archive.compute_file_path(file.id).unwrap(),
+                            human_size(file.content_len, Some(2)),
+                        );
+                    }
                 }
             }
         }
@@ -275,4 +257,56 @@ fn get_item_mtime(path: &Path) -> Result<Timestamp> {
             });
 
     Ok(Timestamp::from(mtime))
+}
+
+pub fn human_size(size: u64, precision: Option<u8>) -> String {
+    let units = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    let (unit, unit_base) = units
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, unit)| {
+            let base = 1024_u64.pow(i.try_into().unwrap());
+
+            if size >= base || base == 1 {
+                Some((unit, base))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+
+    format!(
+        "{} {unit}",
+        approx_int_div(size, unit_base, precision.unwrap_or(2))
+    )
+}
+
+/// Perform an approximate integer division
+///
+/// The last decimal will be rounded to the nearest.
+///
+/// The `precision` parameter is the number of floating-point decimals to keep.
+pub fn approx_int_div(a: u64, b: u64, precision: u8) -> String {
+    let max_prec = 10_u128.pow(u32::from(precision));
+
+    let div = u128::from(a) * max_prec * 10 / u128::from(b);
+    let div = (div / 10) + if div % 10 >= 5 { 1 } else { 0 };
+
+    let int_part = div / max_prec;
+    let frac_part = div % max_prec;
+
+    let mut out = int_part.to_string();
+
+    if frac_part > 0 && precision > 0 {
+        out.push('.');
+        out.push_str(&format!(
+            "{:#0precision$}",
+            frac_part,
+            precision = precision.into()
+        ));
+    }
+
+    out
 }
