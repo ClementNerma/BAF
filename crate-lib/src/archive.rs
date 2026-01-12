@@ -347,6 +347,7 @@ impl<S: WritableSource> Archive<S> {
                 usize::try_from(
                     conf.first_segment_dirs_capacity_override
                         .unwrap_or(conf.default_dirs_capacity_by_ft_segment)
+                        .get()
                 )
                 .unwrap()
             ],
@@ -356,6 +357,7 @@ impl<S: WritableSource> Archive<S> {
                 usize::try_from(
                     conf.first_segment_files_capacity_override
                         .unwrap_or(conf.default_files_capacity_by_ft_segment)
+                        .get()
                 )
                 .unwrap()
             ],
@@ -426,11 +428,12 @@ impl<S: WritableSource> Archive<S> {
             next_segment_addr: None,
             dirs: vec![
                 None;
-                usize::try_from(self.conf.default_dirs_capacity_by_ft_segment).unwrap()
+                usize::try_from(self.conf.default_dirs_capacity_by_ft_segment.get()).unwrap()
             ],
             files: vec![
                 None;
-                usize::try_from(self.conf.default_files_capacity_by_ft_segment).unwrap()
+                usize::try_from(self.conf.default_files_capacity_by_ft_segment.get())
+                    .unwrap()
             ],
         };
 
