@@ -1,4 +1,4 @@
-use std::{path::Path, time::SystemTime};
+use std::{collections::HashMap, path::Path, time::SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -7,7 +7,7 @@ use crate::{
     config::ArchiveConfig,
     data::{
         directory::{Directory, DirectoryId, DirectoryIdOrRoot},
-        file::File,
+        file::{File, FileId},
         path::PathInArchive,
         timestamp::Timestamp,
     },
@@ -270,6 +270,78 @@ impl<S: WritableSource> EasyArchive<S> {
     pub fn flush(&mut self) -> Result<()> {
         self.archive.flush()
     }
+
+    /// Iterate over the list of files and directories
+    ///
+    /// * Items are listed in ascending alphabetical order
+    /// * Directories are listed before files
+    pub fn iter(&self) -> impl Iterator<Item = IterArchiveItem<'_>> {
+        let mut dirs = self.archive.dirs().collect::<Vec<_>>();
+
+        let dirs_name = dirs
+            .iter()
+            .map(|dir| (dir.id, &dir.name))
+            .collect::<HashMap<_, _>>();
+
+        dirs.sort_by(|a, b| {
+            let a_parent_name = match a.parent_dir {
+                DirectoryIdOrRoot::Root => None,
+                DirectoryIdOrRoot::NonRoot(directory_id) => {
+                    Some(dirs_name.get(&directory_id).unwrap())
+                }
+            };
+
+            let b_parent_name = match a.parent_dir {
+                DirectoryIdOrRoot::Root => None,
+                DirectoryIdOrRoot::NonRoot(directory_id) => {
+                    Some(dirs_name.get(&directory_id).unwrap())
+                }
+            };
+
+            a_parent_name
+                .cmp(&b_parent_name)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        let mut root_files = vec![];
+        let mut files_by_parent_dir = HashMap::<DirectoryId, Vec<FileId>>::new();
+
+        for file in self.archive.files() {
+            match file.parent_dir {
+                DirectoryIdOrRoot::Root => root_files.push(file.id),
+                DirectoryIdOrRoot::NonRoot(parent) => {
+                    files_by_parent_dir.entry(parent).or_default().push(file.id)
+                }
+            }
+        }
+
+        dirs.into_iter()
+            .flat_map(move |dir| {
+                [IterArchiveItem::Directory(
+                    self.archive.get_dir(dir.id).unwrap(),
+                )]
+                .into_iter()
+                .chain(
+                    files_by_parent_dir
+                        .remove(&dir.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|file_id| {
+                            IterArchiveItem::File(self.archive.get_file(file_id).unwrap())
+                        }),
+                )
+            })
+            .chain(
+                root_files
+                    .into_iter()
+                    .map(|file_id| IterArchiveItem::File(self.archive.get_file(file_id).unwrap())),
+            )
+    }
+}
+
+pub enum IterArchiveItem<'a> {
+    File(&'a File),
+    Directory(&'a Directory),
 }
 
 impl EasyArchive<ReadonlyFile> {
