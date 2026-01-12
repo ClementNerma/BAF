@@ -19,6 +19,8 @@ use anyhow::Result;
 pub trait ConsumableSource {
     /// Consume the amount of provided bytes after the current position,
     /// then advance the cursor by the same amount of bytes.
+    ///
+    /// Must fail if the remaining number of bytes to consume is less than the provided number of bytes to consume
     fn consume_into_buffer(&mut self, bytes: usize, buf: &mut [u8]) -> Result<()>;
 
     /// Consume precisely n bytes, discard the result
@@ -30,6 +32,8 @@ pub trait ConsumableSource {
 
     /// Consume the amount of provided bytes after the current position,
     /// then advance the cursor by the same amount of bytes.
+    ///
+    /// Must fail if the remaining number of bytes to consume is less than the provided number of bytes to consume
     fn consume_to_array<const BYTES: usize>(&mut self) -> Result<[u8; BYTES]> {
         let mut buf = [0; BYTES];
         self.consume_into_buffer(BYTES, &mut buf)?;
@@ -38,6 +42,8 @@ pub trait ConsumableSource {
 
     /// Consume the amount of provided bytes after the current position into a vector,
     /// then advance the cursor by the same amount of bytes.
+    ///
+    /// Must fail if the remaining number of bytes to consume is less than the provided number of bytes to consume
     fn consume_into_vec(&mut self, bytes: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0; bytes];
         self.consume_into_buffer(bytes, &mut buf)?;
