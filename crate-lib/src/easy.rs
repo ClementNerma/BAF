@@ -52,12 +52,13 @@ impl<S: ReadableSource> EasyArchive<S> {
 
         for segment in PathInArchive::new(path).ok()?.components() {
             let mut dir_entries = match curr_dir_entry {
-                None => self.archive.read_dir(DirectoryIdOrRoot::Root)?,
+                None => self.archive.read_dir(DirectoryIdOrRoot::Root).ok()?,
 
                 Some(id) => match id {
                     DirEntry::Directory(directory) => self
                         .archive
-                        .read_dir(DirectoryIdOrRoot::NonRoot(directory.id))?,
+                        .read_dir(DirectoryIdOrRoot::NonRoot(directory.id))
+                        .ok()?,
 
                     DirEntry::File(_) => return None,
                 },

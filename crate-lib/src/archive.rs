@@ -38,7 +38,7 @@ pub struct Archive<S: ReadableSource> {
     file_segments: Vec<FileTableSegment>,
     dirs: HashMap<DirectoryId, Directory>,
     files: HashMap<FileId, File>,
-    names_in_dirs: HashMap<DirectoryIdOrRoot, HashSet<ItemName>>,
+    dirs_content: HashMap<DirectoryIdOrRoot, DirContent>,
     coverage: Coverage,
 }
 
@@ -72,7 +72,7 @@ impl<S: ReadableSource> Archive<S> {
 
         file_segments.push(prev_segment);
 
-        let coverage = Self::compute_coverage(
+        let coverage = compute_coverage(
             file_segments
                 .iter()
                 .enumerate()
@@ -94,17 +94,17 @@ impl<S: ReadableSource> Archive<S> {
             .map(|file| (file.id, file.clone()))
             .collect();
 
-        let names_in_dirs = Self::compute_names_in_dirs(&file_segments)
+        let dirs_content = compute_dirs_content(&file_segments)
             .map_err(ArchiveDecodingError::DuplicateItemNames)?;
 
         Ok(Self {
             source,
             conf,
             header,
-            names_in_dirs,
-            files,
             dirs,
+            files,
             file_segments,
+            dirs_content,
             coverage,
         })
     }
@@ -157,31 +157,22 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Iterate over all items inside a directory contained inside the archive
-    pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Option<impl Iterator<Item = DirEntry<'_>>> {
-        match id {
-            DirectoryIdOrRoot::Root => {}
-            DirectoryIdOrRoot::NonRoot(id) => {
-                if !self.dirs.contains_key(&id) {
-                    return None;
-                }
-            }
-        }
+    pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
+        let dir_content = self
+            .dirs_content
+            .get(&id)
+            .context("Provided directory ID was not found")?;
 
-        // TODO: optimize to not require a filter over ALL directories
-        let dirs = self
+        Ok(dir_content
             .dirs
-            .values()
-            .filter(move |dir| dir.parent_dir == id)
-            .map(DirEntry::Directory);
-
-        // TODO: same here
-        let files = self
-            .files
-            .values()
-            .filter(move |file| file.parent_dir == id)
-            .map(DirEntry::File);
-
-        Some(dirs.chain(files))
+            .iter()
+            .map(|dir_id| DirEntry::Directory(self.dirs.get(dir_id).unwrap()))
+            .chain(
+                dir_content
+                    .files
+                    .iter()
+                    .map(|file_id| DirEntry::File(self.files.get(file_id).unwrap())),
+            ))
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
@@ -264,75 +255,6 @@ impl<S: ReadableSource> Archive<S> {
                 ItemId::File(_) => "File not found",
             })
     }
-
-    fn compute_coverage<'a>(
-        file_segments: impl IntoIterator<Item = (u64, &'a FileTableSegment)>,
-        len: u64,
-    ) -> Coverage {
-        let mut coverage = Coverage::new(len);
-        coverage.mark_as_used(0, HEADER_SIZE as u64);
-
-        for (segment_addr, segment) in file_segments.into_iter() {
-            coverage.mark_as_used(segment_addr, segment.encoded_len());
-
-            for file in segment.files.iter().flatten() {
-                coverage.mark_as_used(file.content_addr, file.content_len);
-            }
-        }
-
-        coverage
-    }
-
-    fn compute_names_in_dirs<'a>(
-        file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
-    ) -> Result<HashMap<DirectoryIdOrRoot, HashSet<ItemName>>, Vec<ArchiveDuplicateItemNameError>>
-    {
-        let mut names_in_dirs = HashMap::from([(DirectoryIdOrRoot::Root, HashSet::new())]);
-
-        let mut errors = vec![];
-
-        for segment in file_segments {
-            for dir in segment.dirs().iter().flatten() {
-                if !names_in_dirs
-                    .entry(dir.parent_dir)
-                    .or_default()
-                    .insert(dir.name.clone())
-                {
-                    errors.push(ArchiveDuplicateItemNameError {
-                        id: ItemId::Directory(dir.id),
-                        parent_dir: dir.parent_dir,
-                        name: dir.name.clone(),
-                    });
-                }
-
-                assert!(
-                    names_in_dirs
-                        .insert(DirectoryIdOrRoot::NonRoot(dir.id), HashSet::new())
-                        .is_none()
-                );
-            }
-
-            for file in segment.files().iter().flatten() {
-                if !names_in_dirs
-                    .entry(file.parent_dir)
-                    .or_default()
-                    .insert(file.name.clone())
-                {
-                    errors.push(ArchiveDuplicateItemNameError {
-                        id: ItemId::File(file.id),
-                        parent_dir: file.parent_dir,
-                        name: file.name.clone(),
-                    });
-                }
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(names_in_dirs)
-        } else {
-            Err(errors)
-        }
-    }
 }
 
 impl<S: WritableSource> Archive<S> {
@@ -370,12 +292,12 @@ impl<S: WritableSource> Archive<S> {
         Ok(Self {
             conf,
             header,
-            coverage: Self::compute_coverage([((HEADER_SIZE as u64), &segment)], source.len()?),
-            names_in_dirs: Self::compute_names_in_dirs([&segment]).unwrap(),
-            source,
-            file_segments: vec![segment],
+            coverage: compute_coverage([((HEADER_SIZE as u64), &segment)], source.len()?),
             dirs: HashMap::new(),
             files: HashMap::new(),
+            dirs_content: HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]),
+            file_segments: vec![segment],
+            source,
         })
     }
 
@@ -515,23 +437,21 @@ impl<S: WritableSource> Archive<S> {
     }
 
     fn ensure_no_duplicate_name(&self, name: &str, parent_dir: DirectoryIdOrRoot) -> Result<()> {
-        match self.names_in_dirs.get(&parent_dir) {
-            Some(names_in_parent_dir) => {
-                if !names_in_parent_dir.contains(name) {
-                    Ok(())
-                } else {
-                    bail!(
-                        "Name '{name}' is already used in {}",
-                        match parent_dir {
-                            DirectoryIdOrRoot::Root => "root directory".to_owned(),
-                            DirectoryIdOrRoot::NonRoot(id) =>
-                                format!("parent directory with ID {id:?}",),
-                        }
-                    );
-                }
-            }
+        let parent_dir_content = self
+            .dirs_content
+            .get(&parent_dir)
+            .context("Provided parent directory ID does not exist")?;
 
-            None => bail!("Provided parent directory ID does not exist"),
+        if !parent_dir_content.names.contains(name) {
+            Ok(())
+        } else {
+            bail!(
+                "Name '{name}' is already used in {}",
+                match parent_dir {
+                    DirectoryIdOrRoot::Root => "root directory".to_owned(),
+                    DirectoryIdOrRoot::NonRoot(id) => format!("parent directory with ID {id:?}",),
+                }
+            );
         }
     }
 
@@ -561,7 +481,7 @@ impl<S: WritableSource> Archive<S> {
 
         let id = DirectoryId(NonZero::new(id.map_or(1, |max| max.get() + 1)).unwrap());
 
-        let directory = Directory {
+        let dir = Directory {
             id,
             name,
             parent_dir,
@@ -570,28 +490,22 @@ impl<S: WritableSource> Archive<S> {
 
         // Write the directory entry itself
         self.source.set_position(entry_addr)?;
-        self.source.write_all(directory.encode().as_ref())?;
+        self.source.write_all(dir.encode().as_ref())?;
 
         // Update names listing for parent directory
-        assert!(
-            self.names_in_dirs
-                .get_mut(&directory.parent_dir)
-                .unwrap()
-                .insert(directory.name.clone())
-        );
+        let parent_dir_content = self.dirs_content.get_mut(&dir.parent_dir).unwrap();
+        assert!(parent_dir_content.names.insert(dir.name.clone()));
+        assert!(parent_dir_content.dirs.insert(dir.id));
 
-        // Create names listing for this directory
-        assert!(
-            self.names_in_dirs
-                .insert(DirectoryIdOrRoot::NonRoot(id), HashSet::new())
-                .is_none()
-        );
+        // Create content listing for the directory
+        self.dirs_content
+            .insert(DirectoryIdOrRoot::NonRoot(dir.id), DirContent::default());
 
         // Update in-memory file segments
-        self.file_segments[segment_index].dirs[entry_index] = Some(directory.clone());
+        self.file_segments[segment_index].dirs[entry_index] = Some(dir.clone());
 
         // Register the new directory
-        assert!(self.dirs.insert(id, directory).is_none());
+        assert!(self.dirs.insert(id, dir).is_none());
 
         Ok(id)
     }
@@ -645,12 +559,9 @@ impl<S: WritableSource> Archive<S> {
         self.source.write_all(file.encode().as_ref())?;
 
         // Update names listing for parent directory
-        assert!(
-            self.names_in_dirs
-                .get_mut(&file.parent_dir)
-                .unwrap()
-                .insert(file.name.clone())
-        );
+        let parent_dir_content = self.dirs_content.get_mut(&file.parent_dir).unwrap();
+        assert!(parent_dir_content.names.insert(file.name.clone()));
+        assert!(parent_dir_content.files.insert(file.id));
 
         // Update in-memory segments
         self.file_segments[segment_index].files[entry_index] = Some(file.clone());
@@ -737,9 +648,9 @@ impl<S: WritableSource> Archive<S> {
 
         self.dirs.get_mut(&id).unwrap().name.clone_from(&new_name);
 
-        let names_in_parent_dir = self.names_in_dirs.get_mut(&dir.parent_dir).unwrap();
-        assert!(names_in_parent_dir.remove(&dir.name));
-        assert!(names_in_parent_dir.insert(new_name));
+        let parent_dir_content = self.dirs_content.get_mut(&dir.parent_dir).unwrap();
+        assert!(parent_dir_content.names.remove(&dir.name));
+        assert!(parent_dir_content.names.insert(new_name));
 
         Ok(())
     }
@@ -769,9 +680,9 @@ impl<S: WritableSource> Archive<S> {
 
         self.files.get_mut(&id).unwrap().name.clone_from(&new_name);
 
-        let names_in_parent_dir = self.names_in_dirs.get_mut(&file.parent_dir).unwrap();
-        assert!(names_in_parent_dir.remove(&file.name));
-        assert!(names_in_parent_dir.insert(new_name));
+        let parent_dir_content = self.dirs_content.get_mut(&file.parent_dir).unwrap();
+        assert!(parent_dir_content.names.remove(&file.name));
+        assert!(parent_dir_content.names.insert(new_name));
 
         Ok(())
     }
@@ -833,20 +744,20 @@ impl<S: WritableSource> Archive<S> {
         // Unregister the directory and remove its name from the listing
         let dir = self.dirs.remove(&id).unwrap();
 
-        assert!(
-            self.names_in_dirs
-                .get_mut(&dir.parent_dir)
-                .unwrap()
-                .remove(&dir.name)
-        );
+        let parent_dir_content = self.dirs_content.get_mut(&dir.parent_dir).unwrap();
 
-        // Remove names listing for this directory
-        let names_in_dir = self
-            .names_in_dirs
-            .remove(&DirectoryIdOrRoot::NonRoot(id))
+        assert!(parent_dir_content.dirs.remove(&dir.id));
+        assert!(parent_dir_content.names.remove(&dir.name));
+
+        // Remove the directory's content listing
+        let DirContent { dirs, files, names } = self
+            .dirs_content
+            .remove(&DirectoryIdOrRoot::NonRoot(dir.id))
             .unwrap();
 
-        assert!(names_in_dir.is_empty());
+        assert!(dirs.is_empty());
+        assert!(files.is_empty());
+        assert!(names.is_empty());
 
         Ok(dir)
     }
@@ -874,12 +785,10 @@ impl<S: WritableSource> Archive<S> {
         // Unregister the file and remove its name from the listing
         let file = self.files.remove(&id).unwrap();
 
-        assert!(
-            self.names_in_dirs
-                .get_mut(&file.parent_dir)
-                .unwrap()
-                .remove(&file.name)
-        );
+        let parent_dir_content = self.dirs_content.get_mut(&file.parent_dir).unwrap();
+
+        assert!(parent_dir_content.files.remove(&file.id));
+        assert!(parent_dir_content.names.remove(&file.name));
 
         // Update coverage
         self.coverage.mark_as_free(Segment {
@@ -948,5 +857,80 @@ impl<'a> DirEntry<'a> {
             DirEntry::Directory(dir) => &dir.name,
             DirEntry::File(file) => &file.name,
         }
+    }
+}
+
+#[derive(Default)]
+struct DirContent {
+    dirs: HashSet<DirectoryId>,
+    files: HashSet<FileId>,
+    names: HashSet<ItemName>,
+}
+
+fn compute_coverage<'a>(
+    file_segments: impl IntoIterator<Item = (u64, &'a FileTableSegment)>,
+    len: u64,
+) -> Coverage {
+    let mut coverage = Coverage::new(len);
+    coverage.mark_as_used(0, HEADER_SIZE as u64);
+
+    for (segment_addr, segment) in file_segments.into_iter() {
+        coverage.mark_as_used(segment_addr, segment.encoded_len());
+
+        for file in segment.files.iter().flatten() {
+            coverage.mark_as_used(file.content_addr, file.content_len);
+        }
+    }
+
+    coverage
+}
+
+fn compute_dirs_content<'a>(
+    file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
+) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<ArchiveDuplicateItemNameError>> {
+    let mut names_in_dirs = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
+
+    let mut errors = vec![];
+
+    for segment in file_segments {
+        for dir in segment.dirs().iter().flatten() {
+            let parent_dir_content = names_in_dirs.entry(dir.parent_dir).or_default();
+
+            assert!(parent_dir_content.dirs.insert(dir.id));
+
+            if !parent_dir_content.names.insert(dir.name.clone()) {
+                errors.push(ArchiveDuplicateItemNameError {
+                    id: ItemId::Directory(dir.id),
+                    parent_dir: dir.parent_dir,
+                    name: dir.name.clone(),
+                });
+            }
+
+            assert!(
+                names_in_dirs
+                    .insert(DirectoryIdOrRoot::NonRoot(dir.id), DirContent::default())
+                    .is_none()
+            );
+        }
+
+        for file in segment.files().iter().flatten() {
+            let parent_dir_content = names_in_dirs.entry(file.parent_dir).or_default();
+
+            assert!(parent_dir_content.files.insert(file.id));
+
+            if !parent_dir_content.names.insert(file.name.clone()) {
+                errors.push(ArchiveDuplicateItemNameError {
+                    id: ItemId::File(file.id),
+                    parent_dir: file.parent_dir,
+                    name: file.name.clone(),
+                });
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(names_in_dirs)
+    } else {
+        Err(errors)
     }
 }
