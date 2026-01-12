@@ -57,7 +57,7 @@ fn inner_main() -> Result<()> {
 
                     DirEntry::File(file) => {
                         println!(
-                            "[Dir ] {} ({} bytes)",
+                            "[File ] {} ({} bytes)",
                             archive.compute_file_path(file.id).unwrap(),
                             human_size(file.content_len, Some(2)),
                         );
