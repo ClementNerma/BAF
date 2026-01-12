@@ -271,6 +271,67 @@ impl<S: WritableSource> EasyArchive<S> {
         self.archive.flush()
     }
 
+    /// (Internal) Compute the full path of an item inside the archive
+    ///
+    /// Used by [`Self::compute_dir_path`] and [`Self::compute_file_path`]
+    fn compute_item_path(
+        &self,
+        item_name: &ItemName,
+        first_parent_dir: DirectoryIdOrRoot,
+    ) -> String {
+        let mut components = vec![];
+
+        let mut next = first_parent_dir;
+
+        loop {
+            match next {
+                DirectoryIdOrRoot::Root => break,
+                DirectoryIdOrRoot::NonRoot(directory_id) => {
+                    let curr = self.archive.get_dir(directory_id).unwrap();
+                    components.push(curr.name.as_ref());
+                    next = curr.parent_dir;
+                }
+            }
+        }
+
+        let predic_size =
+            components.iter().map(|c| c.len()).sum::<usize>() + components.len() + item_name.len();
+
+        let mut name = String::with_capacity(predic_size);
+
+        for component in components.iter().rev() {
+            name.push_str(component);
+            name.push('/');
+        }
+
+        name.push_str(item_name);
+
+        // Ensure the optimization was correctly performed
+        assert_eq!(name.len(), predic_size);
+
+        name
+    }
+
+    /// Compute the full path of a directory inside the archive
+    pub fn compute_dir_path(&self, dir_id: DirectoryId) -> Result<String> {
+        let dir = self
+            .archive
+            .get_dir(dir_id)
+            .context("Directory was not found in archive")?;
+
+        Ok(self.compute_item_path(&dir.name, dir.parent_dir))
+    }
+
+    /// Compute the full path of a file inside the archive
+    pub fn compute_file_path(&self, file_id: FileId) -> Result<String> {
+        let file = self
+            .archive
+            .get_file(file_id)
+            .context("File was not found in archive")?;
+
+        Ok(self.compute_item_path(&file.name, file.parent_dir))
+    }
+
     /// Iterate over the list of files and directories
     ///
     /// * Items are listed in ascending alphabetical order
