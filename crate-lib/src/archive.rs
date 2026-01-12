@@ -156,6 +156,22 @@ impl<S: ReadableSource> Archive<S> {
         }
     }
 
+    /// Get the list of all children directories inside the provided directory
+    pub fn get_children_dirs_of(&self, id: DirectoryIdOrRoot) -> Result<&HashSet<DirectoryId>> {
+        self.dirs_content
+            .get(&id)
+            .map(|content| &content.dirs)
+            .context("Provided directory ID was not found")
+    }
+
+    /// Get the list of all children files inside the provided directory
+    pub fn get_children_files_of(&self, id: DirectoryIdOrRoot) -> Result<&HashSet<FileId>> {
+        self.dirs_content
+            .get(&id)
+            .map(|content| &content.files)
+            .context("Provided directory ID was not found")
+    }
+
     /// Iterate over all items inside a directory contained inside the archive
     pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
         let dir_content = self
