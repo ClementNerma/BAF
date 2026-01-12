@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::source::ReadableSource;
 
 /// Representation of an item's (file or directory) name
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ItemName(String);
 
 impl ItemName {
@@ -81,9 +81,15 @@ impl ItemName {
 }
 
 impl Deref for ItemName {
-    type Target = String;
+    type Target = str;
 
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for ItemName {
+    fn as_ref(&self) -> &str {
         &self.0
     }
 }
@@ -92,12 +98,6 @@ impl Borrow<str> for ItemName {
     fn borrow(&self) -> &str {
         let Self(name) = &self;
         name
-    }
-}
-
-impl AsRef<str> for ItemName {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 
