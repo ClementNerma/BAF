@@ -4,6 +4,7 @@
 
 use std::{
     fs,
+    num::NonZero,
     path::{Path, PathBuf},
     process::ExitCode,
     time::SystemTime,
@@ -14,7 +15,7 @@ use baf::{
     config::ArchiveConfig,
     data::{file::File, timestamp::Timestamp},
     easy::EasyArchive,
-    source::{ReadonlyFile, WritableSource},
+    source::ReadonlyFile,
 };
 use clap::Parser;
 use walkdir::WalkDir;
@@ -95,9 +96,22 @@ fn inner_main() -> Result<()> {
                 }
             }
 
-            let config = ArchiveConfig::default();
+            let ItemsToAdd { dirs, files } = find_items_to_add(&items_path, under_dir.as_deref())?;
+
+            let config = ArchiveConfig {
+                first_segment_dirs_capacity_override: Some(
+                    NonZero::new(u32::try_from(dirs.len()).unwrap() + 1).unwrap(),
+                ),
+
+                first_segment_files_capacity_override: Some(
+                    NonZero::new(u32::try_from(files.len()).unwrap() + 1).unwrap(),
+                ),
+
+                ..Default::default()
+            };
 
             let mut archive = if path.exists() {
+                // TODO: reserve space ahead of time for the computed number of files + dirs
                 EasyArchive::open_from_file(&path, config).map_err(|err| {
                     anyhow!(
                         "Failed to open archive at path '{}': {err:?}",
@@ -110,8 +124,31 @@ fn inner_main() -> Result<()> {
                 })?
             };
 
-            for item_path in &items_path {
-                add_item_to_archive(&mut archive, item_path, under_dir.as_deref())?;
+            println!("> Creating {} directories in archive...", dirs.len());
+
+            for ItemToAdd {
+                real_path,
+                path_in_archive,
+            } in dirs
+            {
+                archive.create_directory(&path_in_archive, get_item_mtime(&real_path)?)?;
+            }
+
+            for ItemToAdd {
+                real_path,
+                path_in_archive,
+            } in files
+            {
+                println!("> Adding file: {}", real_path.display());
+
+                archive
+                    .write_file(
+                        &path_in_archive,
+                        ReadonlyFile::open_readonly(&real_path)
+                            .context("Failed to open file in read mode")?,
+                        get_item_mtime(&real_path)?,
+                    )
+                    .context("Failed to add file to archive")?;
             }
 
             archive.flush().context("Failed to close archive")?;
@@ -121,75 +158,59 @@ fn inner_main() -> Result<()> {
     Ok(())
 }
 
-fn add_item_to_archive(
-    archive: &mut EasyArchive<impl WritableSource>,
-    item_path: &Path,
-    under_dir: Option<&str>,
-) -> Result<()> {
-    if !item_path.exists() {
-        bail!("Item at path '{}' does not exist", item_path.display());
-    }
+struct ItemsToAdd {
+    dirs: Vec<ItemToAdd>,
+    files: Vec<ItemToAdd>,
+}
 
-    let canon_path = fs::canonicalize(item_path)
-        .with_context(|| format!("Failed to canonicalize path '{}'", item_path.display()))?;
+struct ItemToAdd {
+    real_path: PathBuf,
+    path_in_archive: String,
+}
 
-    let mt = canon_path.metadata().with_context(|| {
-        format!(
-            "Failed to get metadata on item at path '{}'",
-            canon_path.display()
-        )
-    })?;
+fn find_items_to_add<P: AsRef<Path>>(items: &[P], under_dir: Option<&str>) -> Result<ItemsToAdd> {
+    let mut dirs = vec![];
+    let mut files = vec![];
 
-    fn add_file_to_archive(
-        archive: &mut EasyArchive<impl WritableSource>,
-        canon_path: &Path,
-        path_in_archive: &str,
-    ) -> Result<()> {
-        println!("Adding file '{path_in_archive}'...");
+    for item_path in items {
+        let item_path = item_path.as_ref();
 
-        archive
-            .write_file(
-                path_in_archive,
-                ReadonlyFile::open_readonly(canon_path)
-                    .context("Failed to open file in read mode")?,
-                get_item_mtime(canon_path)?,
+        if !item_path.exists() {
+            bail!("Item at path '{}' does not exist", item_path.display());
+        }
+
+        let canon_path = fs::canonicalize(item_path)
+            .with_context(|| format!("Failed to canonicalize path '{}'", item_path.display()))?;
+
+        let mt = canon_path.metadata().with_context(|| {
+            format!(
+                "Failed to get metadata on item at path '{}'",
+                canon_path.display()
             )
-            .context("Failed to add file to archive")?;
+        })?;
 
-        Ok(())
-    }
+        if mt.file_type().is_file() {
+            let filename = item_path
+                .file_name()
+                .context("Provided path does not have a file name")?;
 
-    fn get_item_mtime(path: &Path) -> Result<Timestamp> {
-        let mtime = path
-            .metadata()
-            .context("Failed to get metadata for item")?
-            .modified()
-            .unwrap_or_else(|err| {
-                eprintln!("WARN: Failed to get the item's modification time ({err}) ; falling back to system's current time");
-                SystemTime::now()
+            let filename = filename
+                .to_str()
+                .context("Filename contains invalid UTF-8 characters")?;
+
+            files.push(ItemToAdd {
+                real_path: canon_path,
+                path_in_archive: match under_dir {
+                    Some(dir) => format!("{dir}/{filename}"),
+                    None => filename.to_owned(),
+                },
             });
 
-        Ok(Timestamp::from(mtime))
-    }
+            continue;
+        } else if !mt.file_type().is_dir() {
+            bail!("Unkown item type at path '{}'", canon_path.display());
+        }
 
-    if mt.file_type().is_file() {
-        let filename = item_path
-            .file_name()
-            .context("Provided path does not have a file name")?;
-
-        let filename = filename
-            .to_str()
-            .context("Filename contains invalid UTF-8 characters")?;
-
-        add_file_to_archive(
-            archive,
-            &canon_path,
-            &match under_dir {
-                Some(dir) => format!("{dir}/{filename}"),
-                None => filename.to_owned(),
-            },
-        )
-    } else if mt.file_type().is_dir() {
         let under_dir = match under_dir {
             Some(dir) => dir,
             None => {
@@ -222,13 +243,15 @@ fn add_item_to_archive(
             let path_in_archive = format!("{under_dir}/{stripped_path}");
 
             if item.file_type().is_file() {
-                add_file_to_archive(archive, item.path(), &path_in_archive)?;
+                files.push(ItemToAdd {
+                    real_path: item.path().to_owned(),
+                    path_in_archive,
+                });
             } else if item.file_type().is_dir() {
-                println!("Creating directory '{path_in_archive}'...");
-
-                let mtime = get_item_mtime(item.path())?;
-
-                archive.create_directory(&path_in_archive, mtime)?;
+                dirs.push(ItemToAdd {
+                    real_path: item.path().to_owned(),
+                    path_in_archive,
+                });
             } else {
                 eprintln!(
                     "WARN: Ignoring unknown item type at path '{}'",
@@ -236,9 +259,20 @@ fn add_item_to_archive(
                 );
             }
         }
-
-        Ok(())
-    } else {
-        bail!("Unkown item type at path '{}'", canon_path.display());
     }
+
+    Ok(ItemsToAdd { dirs, files })
+}
+
+fn get_item_mtime(path: &Path) -> Result<Timestamp> {
+    let mtime = path
+            .metadata()
+            .context("Failed to get metadata for item")?
+            .modified()
+            .unwrap_or_else(|err| {
+                eprintln!("WARN: Failed to get the item's modification time ({err}) ; falling back to system's current time");
+                SystemTime::now()
+            });
+
+    Ok(Timestamp::from(mtime))
 }
