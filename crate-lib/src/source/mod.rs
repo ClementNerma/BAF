@@ -2,20 +2,16 @@
 //!
 //! See [`file::RealFile`] and [`in_memory::InMemorySource`]
 
-mod cursor;
 mod in_memory;
+mod on_std;
 mod real_file;
-mod seekables;
-
-use std::num::{NonZero, NonZeroU64};
 
 pub use self::{
     in_memory::InMemoryData,
     real_file::{ReadonlyFile, RealFile, WriteableFile},
-    seekables::SeekWrapper,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 /// A source that allows consuming data
 ///
@@ -100,67 +96,4 @@ pub trait FromSourceBytes {
     fn decode(source: &mut impl ConsumableSource) -> Result<Self>
     where
         Self: Sized;
-}
-
-impl FromSourceBytes for u8 {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        source
-            .consume_to_array::<1>()
-            .map(|bytes| *bytes.first().unwrap())
-    }
-}
-
-impl FromSourceBytes for u16 {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        source.consume_to_array::<2>().map(u16::from_le_bytes)
-    }
-}
-
-impl FromSourceBytes for u32 {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        source.consume_to_array::<4>().map(u32::from_le_bytes)
-    }
-}
-
-impl FromSourceBytes for u64 {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        source.consume_to_array::<8>().map(u64::from_le_bytes)
-    }
-}
-
-impl FromSourceBytes for NonZero<u64> {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let num = source.consume_to_array::<8>().map(u64::from_le_bytes)?;
-        NonZeroU64::new(num).context("Integer should be non-zero")
-    }
-}
-
-impl<const N: usize, F: FromSourceBytes + Copy + Default> FromSourceBytes for [F; N] {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut arr = [F::default(); N];
-
-        for val in arr.iter_mut() {
-            *val = F::decode(source)?;
-        }
-
-        Ok(arr)
-    }
 }
