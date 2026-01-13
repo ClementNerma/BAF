@@ -602,6 +602,7 @@ impl<S: Read + Write + Seek> Archive<S> {
         // Update in-memory representation
         *self.files.get_mut(&id).unwrap() = new_file.clone();
 
+        // Update in-memory file segment
         *(self
             .file_segments
             .get_mut(segment_index)
