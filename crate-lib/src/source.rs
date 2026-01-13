@@ -2,17 +2,27 @@ use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 
 use anyhow::{Context, Result};
 
+/// Represent a source from which an [`crate::archive::Archive`] can be opened.
+///
+/// The source may be read-only or read & write.
+///
+/// It basically wraps an existing `Read` / `Write` stream through a buffered reader,
+/// exposing utility functions that allow easier reading and writing.
 pub struct Source<S: Read> {
     reader: BufReader<S>,
 }
 
 impl<S: Read> Source<S> {
+    /// Wrap a stream into a source
     pub fn new(source: S) -> Self {
         Self {
             reader: BufReader::new(source),
         }
     }
 
+    /// Read as many bytes as needed to fill the provided buffer
+    ///
+    /// If not enough bytes can be read, an error will be returned.
     pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
         self.reader.read_exact(buf).with_context(|| {
             format!(
@@ -22,22 +32,28 @@ impl<S: Read> Source<S> {
         })
     }
 
+    /// Read a constant number of bytes and return the resulting array
+    ///
+    /// If not enough bytes can be read, an error will be returned.
     pub fn read_into_array<const LEN: usize>(&mut self) -> Result<[u8; LEN]> {
         let mut buf = [0; LEN];
         self.read_exact(&mut buf)?;
         Ok(buf)
     }
 
+    /// Call [`FromSourceBytes::read_from`] on `self`
     pub fn read_value<T: FromSourceBytes>(&mut self) -> Result<T> {
         T::read_from(self)
     }
 
+    /// Get the underlying stream
     pub fn into_inner(self) -> S {
         self.reader.into_inner()
     }
 }
 
 impl<S: Read + Seek> Source<S> {
+    /// Set the stream's position
     pub fn set_position(&mut self, pos: u64) -> Result<()> {
         self.reader
             .seek(SeekFrom::Start(pos))
@@ -46,18 +62,21 @@ impl<S: Read + Seek> Source<S> {
         Ok(())
     }
 
+    /// Get the current stream's position
     pub fn position(&mut self) -> Result<u64> {
         self.reader
             .stream_position()
             .context("Failed to get current cursor's position")
     }
 
+    /// Advance the stream's position
     pub fn advance(&mut self, bytes: usize) -> Result<()> {
         self.reader
             .seek_relative(i64::try_from(bytes).unwrap())
             .with_context(|| format!("Failed to advance source of {bytes} bytes"))
     }
 
+    /// Seek the stream's total length
     pub fn seek_len(&mut self) -> Result<u64> {
         // TODO: remove once https://github.com/rust-lang/rust/issues/59359 is resolved
         fn stream_len_default(stream: &mut impl Seek) -> Result<u64> {
@@ -71,7 +90,15 @@ impl<S: Read + Seek> Source<S> {
     }
 }
 
-impl<S: Read + Write + Seek> Source<S> {
+// NOTE: In this impl block, we write without buffering (e.g. no `BufWriter`)
+//
+// The reason is that most writes are already made in chunks, and smaller ones
+// involve a lot of hopping around, which would null the benefits of a buffered
+// writer anyway.
+impl<S: Read + Write> Source<S> {
+    /// Write the provided buffer
+    ///
+    /// Calling [`Self::flush`] will be required to avoid losing data.
     pub fn write_all(&mut self, buf: &[u8]) -> Result<()> {
         self.reader
             .get_mut()
@@ -81,6 +108,7 @@ impl<S: Read + Write + Seek> Source<S> {
         Ok(())
     }
 
+    /// Flush all changes to the underlying stream
     pub fn flush(&mut self) -> Result<()> {
         self.reader
             .get_mut()
@@ -89,7 +117,9 @@ impl<S: Read + Write + Seek> Source<S> {
     }
 }
 
+/// A trait representing a value that can be read from a source
 pub trait FromSourceBytes {
+    /// Read the required bytes to make the value from the provided source
     fn read_from(source: &mut Source<impl Read>) -> Result<Self>
     where
         Self: Sized;

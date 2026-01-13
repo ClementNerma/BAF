@@ -31,7 +31,8 @@ use crate::{
 
 /// Representation of an archive
 ///
-/// This type is designed for pretty low-level stuff, for easier manipulation see the [`Archive::easy`] method.
+/// This type is designed for pretty low-level stuff, for easier manipulation see the [`Archive::easy`] method
+/// or open the archive from the [`EasyArchive`] struct.
 pub struct Archive<S: Read + Seek> {
     conf: ArchiveConfig,
     source: Source<S>,
