@@ -3,7 +3,7 @@
 #![warn(unused_crate_dependencies)]
 
 use std::{
-    fs,
+    fs::{self, File},
     num::NonZero,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -13,7 +13,6 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{
     archive::DirEntry, config::ArchiveConfig, data::timestamp::Timestamp, easy::EasyArchive,
-    source::ReadonlyFile,
 };
 use clap::Parser;
 use walkdir::WalkDir;
@@ -121,13 +120,11 @@ fn inner_main() -> Result<()> {
             {
                 println!("> Adding file: {}", real_path.display());
 
+                let file = File::open(&real_path)
+                    .with_context(|| format!("Failed to open file: {}", real_path.display()))?;
+
                 archive
-                    .write_file(
-                        &path_in_archive,
-                        ReadonlyFile::open_readonly(&real_path)
-                            .context("Failed to open file in read mode")?,
-                        get_item_mtime(&real_path)?,
-                    )
+                    .write_file(&path_in_archive, file, get_item_mtime(&real_path)?)
                     .context("Failed to add file to archive")?;
             }
 

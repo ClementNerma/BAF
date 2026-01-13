@@ -1,8 +1,11 @@
-use std::num::NonZero;
+use std::{
+    io::{Read, Seek},
+    num::NonZero,
+};
 
 use anyhow::Result;
 
-use crate::{ensure_only_one_version, source::ReadableSource};
+use crate::ensure_only_one_version;
 
 use super::{
     directory::DirectoryIdOrRoot,
@@ -41,13 +44,13 @@ pub struct File {
 
 impl File {
     pub(crate) fn consume_from_reader(
-        input: &mut SourceWithHeader<impl ReadableSource>,
+        input: &mut SourceWithHeader<impl Read + Seek>,
     ) -> Result<Option<Self>, FileDecodingError> {
         ensure_only_one_version!(input.header.version);
 
         let id = input
             .source
-            .consume_next_value::<u64>()
+            .read_value::<u64>()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         // If an entry starts with a zero, it means its empty
@@ -62,7 +65,7 @@ impl File {
 
         let parent_dir = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         let name = ItemName::consume_from_reader(input.source)
@@ -71,22 +74,22 @@ impl File {
 
         let modif_time = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         let content_addr = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         let content_len = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         let sha3_checksum = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(FileDecodingError::InvalidEntry)?;
 
         Ok(Some(Self {

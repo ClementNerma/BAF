@@ -1,10 +1,13 @@
-use std::num::NonZero;
+use std::{
+    io::{Read, Seek},
+    num::NonZero,
+};
 
 use anyhow::Result;
 
 use crate::{
     ensure_only_one_version,
-    source::{FromSourceBytes, ReadableSource},
+    source::{FromSourceBytes, Source},
 };
 
 use super::{
@@ -35,13 +38,13 @@ pub struct Directory {
 impl Directory {
     /// Decode a raw directory entry from an archive
     pub(crate) fn consume_from_reader(
-        input: &mut SourceWithHeader<impl ReadableSource>,
+        input: &mut SourceWithHeader<impl Read + Seek>,
     ) -> Result<Option<Self>, DirectoryDecodingError> {
         ensure_only_one_version!(input.header.version);
 
         let id = input
             .source
-            .consume_next_value::<u64>()
+            .read_value::<u64>()
             .map_err(DirectoryDecodingError::InvalidEntry)?;
 
         // If an entry starts with a zero, it means its empty
@@ -56,7 +59,7 @@ impl Directory {
 
         let parent_dir = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(DirectoryDecodingError::InvalidEntry)?;
 
         let name = ItemName::consume_from_reader(input.source)
@@ -65,7 +68,7 @@ impl Directory {
 
         let modif_time = input
             .source
-            .consume_next_value()
+            .read_value()
             .map_err(DirectoryDecodingError::InvalidEntry)?;
 
         Ok(Some(Self {
@@ -130,11 +133,11 @@ pub enum DirectoryIdOrRoot {
 }
 
 impl FromSourceBytes for DirectoryIdOrRoot {
-    fn decode(source: &mut impl crate::source::ConsumableSource) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
     where
         Self: Sized,
     {
-        let id = source.consume_next_value::<u64>()?;
+        let id = u64::read_from(source)?;
 
         Ok(match NonZero::new(id) {
             None => Self::Root,

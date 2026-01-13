@@ -1,6 +1,10 @@
-use std::{io::Read, num::NonZero, ops::Deref};
+use std::{
+    io::{Cursor, Read, Seek, Write},
+    num::NonZero,
+    ops::Deref,
+};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use tempfile::NamedTempFile;
 
@@ -14,24 +18,22 @@ use crate::{
         name::ItemName,
         timestamp::Timestamp,
     },
-    source::{InMemoryData, RealFile, WritableSource},
 };
 
 static FILE_CONTENT: &[u8] = b"Hello world!";
 
 #[test]
 fn test_in_memory() -> Result<()> {
-    perform_test_with(InMemoryData::new())
+    perform_test_with(Cursor::new(vec![]))
 }
 
 #[test]
 fn test_on_real_file() -> Result<()> {
     let test_file = NamedTempFile::new().unwrap();
-
-    perform_test_with(RealFile::open(test_file.path()).context("Failed to create file")?)
+    perform_test_with(test_file.as_file())
 }
 
-fn perform_test_with(source: impl WritableSource) -> Result<()> {
+fn perform_test_with(source: impl Read + Write + Seek) -> Result<()> {
     // Create archive
     let mut archive = Archive::create(source, ArchiveConfig::default()).unwrap();
 
@@ -48,7 +50,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             DirectoryIdOrRoot::NonRoot(directory_id),
             ItemName::new("file".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemoryData::from_data(FILE_CONTENT.to_vec()),
+            Cursor::new(FILE_CONTENT.to_vec()),
         )
         .unwrap();
 
@@ -68,7 +70,7 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemoryData::new(),
+            Cursor::new(vec![]),
         )?;
         archive.remove_file(file)?;
 
@@ -91,13 +93,14 @@ fn perform_test_with(source: impl WritableSource) -> Result<()> {
             DirectoryIdOrRoot::NonRoot(dir),
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
-            InMemoryData::new(),
+            Cursor::new(vec![]),
         )?;
 
         archive.remove_directory(dir)?;
     }
 
-    let source = archive.close();
+    // Close archive, get back the source
+    let source = archive.close().unwrap();
 
     // Open archive
     let mut archive = Archive::open(source, ArchiveConfig::default()).unwrap();

@@ -1,3 +1,5 @@
+use std::io::{Read, Seek};
+
 use anyhow::{Context, Result};
 
 use crate::{
@@ -6,16 +8,15 @@ use crate::{
         directory::{DirectoryId, DirectoryIdOrRoot},
         file::FileId,
     },
-    source::ReadableSource,
 };
 
-pub struct ArchiveEasyIter<'a, R: ReadableSource> {
+pub struct ArchiveEasyIter<'a, R: Read + Seek> {
     archive: &'a Archive<R>,
     dir_id: DirectoryIdOrRoot,
     state: IterState<'a, R>,
 }
 
-impl<'a, R: ReadableSource> ArchiveEasyIter<'a, R> {
+impl<'a, R: Read + Seek> ArchiveEasyIter<'a, R> {
     pub(crate) fn new(archive: &'a Archive<R>) -> Self {
         Self::new_for_dir(archive, DirectoryIdOrRoot::Root).unwrap()
     }
@@ -36,7 +37,7 @@ impl<'a, R: ReadableSource> ArchiveEasyIter<'a, R> {
     }
 }
 
-impl<'a, R: ReadableSource> Iterator for ArchiveEasyIter<'a, R> {
+impl<'a, R: Read + Seek> Iterator for ArchiveEasyIter<'a, R> {
     type Item = DirEntry<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -70,7 +71,7 @@ impl<'a, R: ReadableSource> Iterator for ArchiveEasyIter<'a, R> {
     }
 }
 
-pub enum IterState<'a, R: ReadableSource> {
+pub enum IterState<'a, R: Read + Seek> {
     Dirs {
         curr: Option<Box<ArchiveEasyIter<'a, R>>>,
         next: std::collections::hash_set::IntoIter<DirectoryId>,

@@ -1,4 +1,9 @@
-use std::{path::Path, time::SystemTime};
+use std::{
+    fs::{File as StdFile, OpenOptions},
+    io::{Read, Seek, Write},
+    path::Path,
+    time::SystemTime,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -14,7 +19,6 @@ use crate::{
     },
     easy_iter::ArchiveEasyIter,
     file_reader::FileReader,
-    source::{ReadableSource, ReadonlyFile, RealFile, WritableSource, WriteableFile},
 };
 
 /// Representation of an abstraction over the base [`Archive`] type
@@ -22,11 +26,11 @@ use crate::{
 /// This type is easier to use, while the [`Archive`] type is tailored for lower-level manipulations
 ///
 /// The main difference is that instead of dealing with unique identifiers, this type deals with string paths (just like in a real filesystem)
-pub struct EasyArchive<S: ReadableSource> {
+pub struct EasyArchive<S: Read + Seek> {
     archive: Archive<S>,
 }
 
-impl<S: ReadableSource> EasyArchive<S> {
+impl<S: Read + Seek> EasyArchive<S> {
     /// Create from an [`Archive`] value
     pub fn new(archive: Archive<S>) -> Self {
         Self { archive }
@@ -107,7 +111,7 @@ impl<S: ReadableSource> EasyArchive<S> {
     }
 }
 
-impl<S: WritableSource> EasyArchive<S> {
+impl<S: Read + Write + Seek> EasyArchive<S> {
     /// Get or create a directory
     ///
     /// Either returns the existing directory's informations or the newly-created one's
@@ -174,7 +178,7 @@ impl<S: WritableSource> EasyArchive<S> {
     pub fn write_file(
         &mut self,
         path: &str,
-        content: impl ReadableSource,
+        content: impl Read + Seek,
         modif_time: Timestamp,
     ) -> Result<()> {
         if let Some(path) = self.get_file(path) {
@@ -207,7 +211,7 @@ impl<S: WritableSource> EasyArchive<S> {
     pub fn create_file(
         &mut self,
         path: &str,
-        content: impl ReadableSource,
+        content: impl Read + Seek,
         modif_time: Timestamp,
     ) -> Result<()> {
         if self.get_file(path).is_some() {
@@ -221,7 +225,7 @@ impl<S: WritableSource> EasyArchive<S> {
     pub fn update_file(
         &mut self,
         path: &str,
-        content: impl ReadableSource,
+        content: impl Read + Seek,
         modif_time: Timestamp,
     ) -> Result<()> {
         if self.get_file(path).is_none() {
@@ -352,37 +356,40 @@ impl<S: WritableSource> EasyArchive<S> {
     }
 }
 
-impl EasyArchive<ReadonlyFile> {
-    /// Open from a file (on-disk)
+impl EasyArchive<StdFile> {
+    /// Open an archive (on disk) in read-only mode
     pub fn open_from_file_readonly(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
     ) -> Result<Self, ArchiveDecodingError> {
-        let file = RealFile::open_readonly(&path)
+        let file = OpenOptions::new()
+            .truncate(false)
+            .read(true)
+            .write(false)
+            .open(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
             .map_err(ArchiveDecodingError::IoError)?;
 
         Archive::open(file, conf).map(EasyArchive::new)
     }
-}
 
-impl EasyArchive<WriteableFile> {
-    /// Open from a file (on-disk)
+    /// Open an archive (on disk) in writable mode
     pub fn open_from_file(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
     ) -> Result<Self, ArchiveDecodingError> {
-        let file = RealFile::open(&path)
+        let file = StdFile::open(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
             .map_err(ArchiveDecodingError::IoError)?;
 
         Archive::open(file, conf).map(EasyArchive::new)
     }
 
-    /// Create an archive into a file
+    /// Create an archive (on disk) in writable mode
     pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
-        let file = RealFile::create(&path)
+        let file = StdFile::create_new(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+        // .map_err(ArchiveDecodingError::IoError)?; // TODO
 
         Archive::create(file, conf).map(Archive::easy)
     }

@@ -1,6 +1,8 @@
+use std::io::{Read, Seek};
+
 use anyhow::{Result, bail};
 
-use crate::{ensure_only_one_version, source::ReadableSource};
+use crate::{ensure_only_one_version, source::Source};
 
 pub static MAGIC_NUMBER: &[u8] = b"BASICARC";
 pub static HEADER_SIZE: usize = 256;
@@ -17,24 +19,25 @@ pub struct Header {
 
 impl Header {
     /// Decode the header of an archive from a readable source
-    pub fn decode<S: ReadableSource>(source: &mut S) -> Result<SourceWithHeader<'_, S>> {
+    pub fn decode<S: Read + Seek>(source: &mut Source<S>) -> Result<SourceWithHeader<'_, S>> {
         source.set_position(0)?;
 
-        let got_magic_number = source.consume_to_array::<8>()?;
+        let got_magic_number = source.read_into_array::<8>()?;
 
         if got_magic_number != MAGIC_NUMBER {
             bail!("Invalid magic number: got {got_magic_number:X?}, expected {MAGIC_NUMBER:X?}");
         }
 
-        let version = source.consume_next_value::<u32>()?;
+        let version = source.read_value::<u32>()?;
         let version = ArchiveVersion::decode(version)?;
 
         ensure_only_one_version!(version);
 
         let bytes = (HEADER_SIZE as u64) - source.position()?;
+        let bytes = u8::try_from(bytes).unwrap();
 
         let mut buf = [0; 256];
-        source.consume_into_buffer(usize::try_from(bytes).unwrap(), &mut buf)?;
+        source.read_exact(&mut buf[0..usize::from(bytes)])?;
 
         if buf.iter().any(|b| *b != 0) {
             bail!("Rest of the header is not filled with zeroes");
@@ -95,9 +98,9 @@ impl ArchiveVersion {
 /// A mutable reference to a readable source along with the read archive's header
 ///
 /// The readable source's cursor will have advanced by the header's length
-pub struct SourceWithHeader<'s, S: ReadableSource> {
+pub struct SourceWithHeader<'s, S: Read> {
     /// Source the header was read from
-    pub source: &'s mut S,
+    pub source: &'s mut Source<S>,
 
     /// Decoded and validated header
     pub header: Header,

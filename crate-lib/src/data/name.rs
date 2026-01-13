@@ -1,8 +1,8 @@
-use std::{borrow::Borrow, fmt::Display, ops::Deref};
+use std::{borrow::Borrow, fmt::Display, io::Read, ops::Deref};
 
 use anyhow::Result;
 
-use crate::source::ReadableSource;
+use crate::source::Source;
 
 /// Representation of an item's (file or directory) name
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,9 +40,9 @@ impl ItemName {
     }
 
     pub fn consume_from_reader(
-        source: &mut impl ReadableSource,
+        source: &mut Source<impl Read>,
     ) -> Result<Result<Self, NameDecodingError>> {
-        source.consume_next_value::<[u8; 256]>().map(Self::decode)
+        source.read_into_array::<256>().map(Self::decode)
     }
 
     /// Decode an item name from a list of bytes

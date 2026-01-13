@@ -1,4 +1,6 @@
-use crate::{ensure_only_one_version, source::ReadableSource};
+use std::io::{Read, Seek};
+
+use crate::ensure_only_one_version;
 
 use super::{
     directory::{DIRECTORY_ENTRY_SIZE, Directory, DirectoryDecodingError},
@@ -7,6 +9,7 @@ use super::{
 };
 
 /// Representation of a file table segment
+#[derive(Debug)]
 pub(crate) struct FileTableSegment {
     /// Address of the next segment inside the archive
     pub next_segment_addr: Option<u64>,
@@ -21,24 +24,24 @@ pub(crate) struct FileTableSegment {
 impl FileTableSegment {
     /// Decode a raw file table segment
     pub fn decode(
-        input: &mut SourceWithHeader<impl ReadableSource>,
+        input: &mut SourceWithHeader<impl Read + Seek>,
     ) -> Result<Self, FileTableSegmentDecodingError> {
         // Only there to ensure at compile time there is only one possible version
         ensure_only_one_version!(input.header.version);
 
         let next_segment_addr = input
             .source
-            .consume_next_value::<u64>()
+            .read_value::<u64>()
             .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
         let dirs_count = input
             .source
-            .consume_next_value::<u32>()
+            .read_value::<u32>()
             .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
         let files_count = input
             .source
-            .consume_next_value::<u32>()
+            .read_value::<u32>()
             .map_err(FileTableSegmentDecodingError::InvalidHeader)?;
 
         let dirs = (0..dirs_count)
@@ -137,7 +140,7 @@ impl FileTableSegment {
 
     pub fn consume_next_segment(
         &self,
-        input: &mut SourceWithHeader<impl ReadableSource>,
+        input: &mut SourceWithHeader<impl Read + Seek>,
     ) -> Option<Result<(u64, Self), FileTableSegmentDecodingError>> {
         self.next_segment_addr.map(|addr| {
             input

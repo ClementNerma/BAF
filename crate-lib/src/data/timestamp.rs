@@ -1,8 +1,11 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    io::Read,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Result;
 
-use crate::source::{ConsumableSource, FromSourceBytes};
+use crate::source::{FromSourceBytes, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(u64);
@@ -35,10 +38,10 @@ impl From<Timestamp> for SystemTime {
 }
 
 impl FromSourceBytes for Timestamp {
-    fn decode(source: &mut impl ConsumableSource) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
     where
         Self: Sized,
     {
-        source.consume_next_value::<u64>().map(Self)
+        source.read_value::<u64>().map(Self)
     }
 }

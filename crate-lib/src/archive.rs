@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet, hash_map::Values},
+    collections::{HashMap, HashSet},
+    io::{Cursor, Read, Seek, Write},
     num::NonZero,
 };
 
@@ -22,7 +23,7 @@ use crate::{
     },
     easy::EasyArchive,
     file_reader::FileReader,
-    source::{InMemoryData, ReadableSource, WritableSource},
+    source::Source,
 };
 
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
@@ -31,9 +32,9 @@ use crate::{
 /// Representation of an archive
 ///
 /// This type is designed for pretty low-level stuff, for easier manipulation see the [`Archive::easy`] method.
-pub struct Archive<S: ReadableSource> {
+pub struct Archive<S: Read + Seek> {
     conf: ArchiveConfig,
-    source: S,
+    source: Source<S>,
     header: Header,
     file_segments: Vec<FileTableSegment>,
     dirs: HashMap<DirectoryId, Directory>,
@@ -42,13 +43,15 @@ pub struct Archive<S: ReadableSource> {
     coverage: Coverage,
 }
 
-impl<S: ReadableSource> Archive<S> {
+impl<S: Read + Seek> Archive<S> {
     /// Open an existing archive
     ///
     /// May return a set of warnings about ill-formed archives
     ///
     /// Will read the entire archive's metadata segments before returning.
-    pub fn open(mut source: S, conf: ArchiveConfig) -> Result<Self, ArchiveDecodingError> {
+    pub fn open(source: S, conf: ArchiveConfig) -> Result<Self, ArchiveDecodingError> {
+        let mut source = Source::new(source);
+
         let mut source_with_header =
             Header::decode(&mut source).map_err(ArchiveDecodingError::InvalidHeader)?;
         let header = source_with_header.header;
@@ -77,7 +80,7 @@ impl<S: ReadableSource> Archive<S> {
                 .iter()
                 .enumerate()
                 .map(|(i, segment)| (*file_segments_addr.get(i).unwrap(), segment)),
-            source.len().map_err(ArchiveDecodingError::IoError)?,
+            source.seek_len().map_err(ArchiveDecodingError::IoError)?,
         );
 
         let dirs = file_segments
@@ -115,7 +118,7 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get access to the underlying source
-    pub fn source(&mut self) -> &mut S {
+    pub fn source(&mut self) -> &mut Source<S> {
         &mut self.source
     }
 
@@ -125,12 +128,12 @@ impl<S: ReadableSource> Archive<S> {
     }
 
     /// Get the list of all directories contained inside the archive
-    pub fn dirs(&self) -> Values<'_, DirectoryId, Directory> {
+    pub fn dirs(&self) -> impl Iterator<Item = &Directory> {
         self.dirs.values()
     }
 
     /// Get the list of all files contained inside the archive
-    pub fn files(&self) -> Values<'_, FileId, File> {
+    pub fn files(&self) -> impl Iterator<Item = &File> {
         self.files.values()
     }
 
@@ -206,33 +209,7 @@ impl<S: ReadableSource> Archive<S> {
 
     /// Get the content of a file contained inside the archive into a vector of bytes
     pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
-        let file = self.files.get(&id).context("File not found in archive")?;
-
-        self.source.set_position(file.content_addr)?;
-
-        let file_len = usize::try_from(file.content_len).with_context(|| {
-            format!(
-                "Cannot read more than {} bytes into a Vec<>, found {}",
-                usize::MAX,
-                file.content_len
-            )
-        })?;
-
-        let bytes = self.source.consume_into_vec(file_len)?;
-
-        let mut hash = Sha3_256::new();
-        hash.update(&bytes);
-
-        let hash: [u8; 32] = hash.finalize().into();
-
-        if hash != file.sha3_checksum {
-            bail!(
-                "File's hash doesn't match: expected {:#?}, got {hash:#?}",
-                file.sha3_checksum
-            );
-        }
-
-        Ok(bytes)
+        self.read_file(id).and_then(FileReader::read_at_once)
     }
 
     fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
@@ -273,9 +250,11 @@ impl<S: ReadableSource> Archive<S> {
     }
 }
 
-impl<S: WritableSource> Archive<S> {
+impl<S: Read + Write + Seek> Archive<S> {
     /// Create a new archive
-    pub fn create(mut source: S, conf: ArchiveConfig) -> Result<Self> {
+    pub fn create(source: S, conf: ArchiveConfig) -> Result<Self> {
+        let mut source = Source::new(source);
+
         let header = Header::default();
 
         let segment = FileTableSegment {
@@ -308,7 +287,7 @@ impl<S: WritableSource> Archive<S> {
         Ok(Self {
             conf,
             header,
-            coverage: compute_coverage([((HEADER_SIZE as u64), &segment)], source.len()?),
+            coverage: compute_coverage([((HEADER_SIZE as u64), &segment)], source.seek_len()?),
             dirs: HashMap::new(),
             files: HashMap::new(),
             dirs_content: HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]),
@@ -320,9 +299,9 @@ impl<S: WritableSource> Archive<S> {
     /// Write some data (file table segment, file content, etc.) wherever there is some free space
     fn write_data_where_possible(
         &mut self,
-        mut data: impl ReadableSource,
+        mut data: Source<impl Read + Seek>,
     ) -> Result<(u64, Sha3_256)> {
-        let len = data.len()?;
+        let len = data.seek_len()?;
 
         let (addr, growing) = match self.coverage.find_free_zone_for(len) {
             Some(segment) => (segment.start, false),
@@ -342,7 +321,7 @@ impl<S: WritableSource> Archive<S> {
             let mut buf = [0; CHUNK_SIZE];
             let len = (CHUNK_SIZE as u64).min(len - written);
             let len_usize = usize::try_from(len).unwrap();
-            data.consume_into_buffer(len_usize, &mut buf)?;
+            data.read_exact(&mut buf[0..len_usize])?;
 
             let data = &buf[0..len_usize];
 
@@ -352,7 +331,7 @@ impl<S: WritableSource> Archive<S> {
         }
 
         if growing {
-            self.coverage.grow_to(self.source.len()?);
+            self.coverage.grow_to(self.source.seek_len()?);
         }
 
         self.coverage.mark_as_used(addr, len);
@@ -376,8 +355,10 @@ impl<S: WritableSource> Archive<S> {
         };
 
         // Write new segment
-        let (new_segment_addr, _) =
-            self.write_data_where_possible(InMemoryData::from_data(segment.encode()))?;
+        let (new_segment_addr, _) = self.write_data_where_possible(
+            // TODO: improve this mess
+            Source::new(Cursor::new(segment.encode())),
+        )?;
 
         // Update previous segment's 'next address'
         self.source
@@ -536,8 +517,10 @@ impl<S: WritableSource> Archive<S> {
         parent_dir: DirectoryIdOrRoot,
         name: ItemName,
         modif_time: Timestamp,
-        mut content: impl ReadableSource,
+        content: impl Read + Seek,
     ) -> Result<FileId> {
+        let mut content = Source::new(content);
+
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         let SegmentEntry {
@@ -547,7 +530,7 @@ impl<S: WritableSource> Archive<S> {
         } = self.get_addr_for_item_insert(ItemType::File)?;
 
         // Write the file's content
-        let content_len = content.len()?;
+        let content_len = content.seek_len()?;
         let (content_addr, sha3_checksum) = self.write_data_where_possible(content)?;
 
         // Get a new ID for the file
@@ -595,7 +578,7 @@ impl<S: WritableSource> Archive<S> {
         &mut self,
         id: FileId,
         new_modif_time: Timestamp,
-        mut new_content: impl ReadableSource,
+        new_content: impl Read + Seek,
     ) -> Result<()> {
         let SegmentEntry {
             segment_index,
@@ -605,7 +588,9 @@ impl<S: WritableSource> Archive<S> {
             .get_item_entry(ItemId::File(id))
             .context("Provided file ID was not found")?;
 
-        let content_len = new_content.len()?;
+        let mut new_content = Source::new(new_content);
+
+        let content_len = new_content.seek_len()?;
         let (content_addr, sha3_checksum) = self.write_data_where_possible(new_content)?;
 
         let update = |file: &mut File| {
@@ -823,8 +808,9 @@ impl<S: WritableSource> Archive<S> {
     /// Close the archive
     ///
     /// Returns the original source provided at type construction
-    pub fn close(self) -> S {
-        self.source
+    pub fn close(mut self) -> Result<S> {
+        self.source.flush()?;
+        Ok(self.source.into_inner())
     }
 }
 
