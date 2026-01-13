@@ -75,6 +75,4 @@ fn reuse_file_space() {
     let in_mem = archive.close().unwrap();
 
     assert_eq!(in_mem.get_ref().len(), len);
-
-    todo!()
 }

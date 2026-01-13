@@ -586,7 +586,15 @@ impl<S: Read + Write + Seek> Archive<S> {
 
         let mut new_content = Source::new(new_content);
 
+        let file = self.files.get(&id).unwrap();
+
         let content_len = new_content.seek_len()?;
+
+        self.coverage.mark_as_free(Segment {
+            start: file.content_addr,
+            len: file.content_len,
+        });
+
         let (content_addr, sha3_checksum) = self.write_data_where_possible(new_content)?;
 
         // Update file metadata
