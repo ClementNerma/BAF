@@ -1,6 +1,5 @@
 use std::io::{Error, Read};
 
-use anyhow::Result;
 use sha3::{Digest, Sha3_256};
 
 use crate::source::Source;
@@ -27,15 +26,6 @@ impl<'a, S: Read> FileReader<'a, S> {
             pending_checksum: Sha3_256::new(),
             pos: 0,
         }
-    }
-
-    pub fn read_at_once(mut self) -> Result<Vec<u8>> {
-        assert_eq!(self.pos, 0);
-
-        let mut buf = Vec::with_capacity(usize::try_from(self.file_len()).unwrap());
-        self.read_to_end(&mut buf)?;
-
-        Ok(buf)
     }
 
     pub fn file_len(&self) -> u64 {

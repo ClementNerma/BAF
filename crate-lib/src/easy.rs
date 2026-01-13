@@ -243,8 +243,12 @@ impl<S: Read + Write + Seek> EasyArchive<S> {
 
     /// Get the content of a file contained inside the archive into a vector of bytes
     pub fn read_file_to_vec(&mut self, path: &str) -> Result<Vec<u8>> {
-        let id = self.get_file(path).context("File was not found")?.id;
-        self.archive.read_file_to_vec(id)
+        let mut file = self.read_file(path)?;
+
+        let mut buf = Vec::with_capacity(usize::try_from(file.file_len()).unwrap());
+        file.read_to_end(&mut buf)?;
+
+        Ok(buf)
     }
 
     /// Get the content of a file contained inside the archive as a string

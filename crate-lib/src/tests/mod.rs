@@ -132,12 +132,15 @@ fn perform_test_with(source: impl Read + Write + Seek) -> Result<()> {
         matches!(archive.read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(NonZero::new(1).unwrap()))).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
-    assert_eq!(
-        archive
-            .read_file_to_vec(FileId(NonZero::new(2).unwrap()))
-            .unwrap(),
-        FILE_CONTENT
-    );
+    let mut file_content = vec![];
+
+    archive
+        .read_file(FileId(NonZero::new(2).unwrap()))
+        .unwrap()
+        .read_to_end(&mut file_content)
+        .unwrap();
+
+    assert_eq!(file_content, FILE_CONTENT);
 
     let mut file_reader = archive.read_file(FileId(NonZero::new(2).unwrap())).unwrap();
     let mut file_content = vec![];

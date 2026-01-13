@@ -208,11 +208,6 @@ impl<S: Read + Seek> Archive<S> {
         ))
     }
 
-    /// Get the content of a file contained inside the archive into a vector of bytes
-    pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
-        self.read_file(id).and_then(FileReader::read_at_once)
-    }
-
     fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
         self.file_segments
             .iter()
