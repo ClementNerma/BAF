@@ -589,33 +589,28 @@ impl<S: Read + Write + Seek> Archive<S> {
         let content_len = new_content.seek_len()?;
         let (content_addr, sha3_checksum) = self.write_data_where_possible(new_content)?;
 
-        let update = |file: &mut File| {
-            file.content_addr = content_addr;
-            file.content_len = content_len;
-            file.sha3_checksum = sha3_checksum.clone().finalize().into();
-            file.modif_time = new_modif_time;
-        };
-
         // Update file metadata
         let mut new_file = self.files.get_mut(&id).unwrap().clone();
-        update(&mut new_file);
+        new_file.content_addr = content_addr;
+        new_file.content_len = content_len;
+        new_file.sha3_checksum = sha3_checksum.clone().finalize().into();
+        new_file.modif_time = new_modif_time;
 
         self.source.set_position(entry_addr)?;
         self.source.write_all(&new_file.encode())?;
 
         // Update in-memory representation
-        update(self.files.get_mut(&id).unwrap());
+        *self.files.get_mut(&id).unwrap() = new_file.clone();
 
-        update(
-            self.file_segments
-                .get_mut(segment_index)
-                .unwrap()
-                .files
-                .get_mut(entry_index)
-                .unwrap()
-                .as_mut()
-                .unwrap(),
-        );
+        *(self
+            .file_segments
+            .get_mut(segment_index)
+            .unwrap()
+            .files
+            .get_mut(entry_index)
+            .unwrap()
+            .as_mut()
+            .unwrap()) = new_file.clone();
 
         Ok(())
     }
