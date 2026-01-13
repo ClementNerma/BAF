@@ -40,8 +40,10 @@ fn inner_main() -> Result<()> {
                 bail!("Path {} already exists", path.display());
             }
 
-            EasyArchive::create_as_file(path, ArchiveConfig::default())
+            let mut archive = EasyArchive::create_as_file(path, ArchiveConfig::default())
                 .context("Failed to create archive")?;
+
+            archive.flush().context("Failed to flush the archive")?;
         }
 
         Action::List => {
