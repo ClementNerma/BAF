@@ -13,6 +13,7 @@ mod config;
 mod coverage;
 mod data;
 mod file_reader;
+mod health;
 mod iter;
 mod source;
 mod with_paths;
@@ -22,7 +23,7 @@ mod tests;
 
 // Re-export useful types directly from the root
 pub use self::{
-    archive::{Archive, ArchiveDecodingError, ArchiveDuplicateItemNameError, DirEntry, ItemId},
+    archive::{Archive, ArchiveDecodingError, DirEntry, ItemId},
     config::ArchiveConfig,
     data::{
         directory::{Directory, DirectoryDecodingError, DirectoryId, DirectoryIdOrRoot},
@@ -32,6 +33,7 @@ pub use self::{
         timestamp::Timestamp,
     },
     file_reader::FileReader,
+    health::FtCorrectnessError,
     iter::ArchiveIter,
     source::Source,
     with_paths::{ItemIdOrRoot, WithPaths},

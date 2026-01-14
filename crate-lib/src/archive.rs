@@ -24,6 +24,7 @@ use crate::{
         timestamp::Timestamp,
     },
     file_reader::FileReader,
+    health::{DirContent, FtCorrectnessError, check_file_table_correctness},
     iter::ArchiveIter,
     source::Source,
     with_paths::WithPaths,
@@ -31,6 +32,7 @@ use crate::{
 
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
+// TODO: ensure no duplicate ID either in dirs or files
 
 /// Representation of an archive
 ///
@@ -92,17 +94,17 @@ impl<S: Read + Seek> Archive<S> {
             .flat_map(FileTableSegment::dirs)
             .flatten()
             .map(|dir| (dir.id, dir.clone()))
-            .collect();
+            .collect::<HashMap<_, _>>();
 
         let files = file_segments
             .iter()
             .flat_map(FileTableSegment::files)
             .flatten()
             .map(|file| (file.id, file.clone()))
-            .collect();
+            .collect::<HashMap<_, _>>();
 
-        let dirs_content = compute_dirs_content(&file_segments)
-            .map_err(ArchiveDecodingError::DuplicateItemNames)?;
+        let dirs_content = check_file_table_correctness(&file_segments)
+            .map_err(ArchiveDecodingError::FileTableCorrectnessError)?;
 
         Ok(Self {
             source,
@@ -908,129 +910,6 @@ impl<S: Read + Write + Seek> Archive<S> {
     }
 }
 
-#[derive(Debug)]
-pub enum ArchiveDecodingError {
-    IoError(anyhow::Error),
-    DuplicateItemNames(Vec<ArchiveDuplicateItemNameError>),
-    InvalidHeader(anyhow::Error),
-    InvalidFileTableSegment(FileTableSegmentDecodingError),
-}
-
-#[derive(Debug)]
-pub struct ArchiveDuplicateItemNameError {
-    pub id: ItemId,
-    pub parent_dir: DirectoryIdOrRoot,
-    pub name: ItemName,
-}
-
-#[derive(Debug)]
-pub enum ItemId {
-    Directory(DirectoryId),
-    File(FileId),
-}
-
-enum ItemType {
-    Directory,
-    File,
-}
-
-struct SegmentEntry {
-    segment_index: usize,
-    entry_index: usize,
-    entry_addr: u64,
-}
-
-/// Entry in a directory
-#[derive(Debug, Clone)]
-pub enum DirEntry<'a> {
-    Directory(&'a Directory),
-    File(&'a File),
-}
-
-impl<'a> DirEntry<'a> {
-    pub fn name(&self) -> &ItemName {
-        match self {
-            DirEntry::Directory(dir) => &dir.name,
-            DirEntry::File(file) => &file.name,
-        }
-    }
-}
-
-#[derive(Default)]
-struct DirContent {
-    dirs: HashSet<DirectoryId>,
-    files: HashSet<FileId>,
-    names: HashSet<ItemName>,
-}
-
-fn compute_coverage<'a>(
-    file_segments: impl IntoIterator<Item = (u64, &'a FileTableSegment)>,
-    len: u64,
-) -> Coverage {
-    let mut coverage = Coverage::new(len);
-    coverage.mark_as_used(0, HEADER_SIZE as u64);
-
-    for (segment_addr, segment) in file_segments.into_iter() {
-        coverage.mark_as_used(segment_addr, segment.encoded_len());
-
-        for file in segment.files.iter().flatten() {
-            coverage.mark_as_used(file.content_addr, file.content_len);
-        }
-    }
-
-    coverage
-}
-
-fn compute_dirs_content<'a>(
-    file_segments: impl IntoIterator<Item = &'a FileTableSegment>,
-) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<ArchiveDuplicateItemNameError>> {
-    let mut names_in_dirs = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
-
-    let mut errors = vec![];
-
-    for segment in file_segments {
-        for dir in segment.dirs().iter().flatten() {
-            let parent_dir_content = names_in_dirs.entry(dir.parent_dir).or_default();
-
-            assert!(parent_dir_content.dirs.insert(dir.id));
-
-            if !parent_dir_content.names.insert(dir.name.clone()) {
-                errors.push(ArchiveDuplicateItemNameError {
-                    id: ItemId::Directory(dir.id),
-                    parent_dir: dir.parent_dir,
-                    name: dir.name.clone(),
-                });
-            }
-
-            assert!(
-                names_in_dirs
-                    .insert(DirectoryIdOrRoot::NonRoot(dir.id), DirContent::default())
-                    .is_none()
-            );
-        }
-
-        for file in segment.files().iter().flatten() {
-            let parent_dir_content = names_in_dirs.entry(file.parent_dir).or_default();
-
-            assert!(parent_dir_content.files.insert(file.id));
-
-            if !parent_dir_content.names.insert(file.name.clone()) {
-                errors.push(ArchiveDuplicateItemNameError {
-                    id: ItemId::File(file.id),
-                    parent_dir: file.parent_dir,
-                    name: file.name.clone(),
-                });
-            }
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(names_in_dirs)
-    } else {
-        Err(errors)
-    }
-}
-
 impl Archive<StdFile> {
     /// Open an archive (on disk) in read-only mode
     pub fn open_from_file_readonly(
@@ -1068,4 +947,63 @@ impl Archive<StdFile> {
 
         Archive::create(file, conf)
     }
+}
+
+#[derive(Debug)]
+pub enum ArchiveDecodingError {
+    IoError(anyhow::Error),
+    FileTableCorrectnessError(Vec<FtCorrectnessError>),
+    InvalidHeader(anyhow::Error),
+    InvalidFileTableSegment(FileTableSegmentDecodingError),
+}
+
+#[derive(Debug)]
+pub enum ItemId {
+    Directory(DirectoryId),
+    File(FileId),
+}
+
+enum ItemType {
+    Directory,
+    File,
+}
+
+struct SegmentEntry {
+    segment_index: usize,
+    entry_index: usize,
+    entry_addr: u64,
+}
+
+/// Entry in a directory
+#[derive(Debug, Clone)]
+pub enum DirEntry<'a> {
+    Directory(&'a Directory),
+    File(&'a File),
+}
+
+impl<'a> DirEntry<'a> {
+    pub fn name(&self) -> &ItemName {
+        match self {
+            DirEntry::Directory(dir) => &dir.name,
+            DirEntry::File(file) => &file.name,
+        }
+    }
+}
+
+fn compute_coverage<'a>(
+    file_segments: impl IntoIterator<Item = (u64, &'a FileTableSegment)>,
+    len: u64,
+) -> Coverage {
+    let mut coverage = Coverage::new(len);
+    coverage.mark_as_used(0, HEADER_SIZE as u64);
+
+    for (segment_addr, segment) in file_segments.into_iter() {
+        coverage.mark_as_used(segment_addr, segment.encoded_len());
+
+        for file in segment.files.iter().flatten() {
+            coverage.mark_as_used(file.content_addr, file.content_len);
+        }
+    }
+
+    coverage
 }
