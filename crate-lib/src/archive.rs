@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
+    fs::{File as StdFile, OpenOptions},
     io::{Cursor, Read, Seek, Write},
     num::NonZero,
+    path::Path,
 };
 
 use anyhow::{Context, Result, bail};
@@ -21,9 +23,10 @@ use crate::{
         name::ItemName,
         timestamp::Timestamp,
     },
-    easy::EasyArchive,
     file_reader::FileReader,
+    iter::ArchiveIter,
     source::Source,
+    with_paths::WithPaths,
 };
 
 // TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
@@ -113,11 +116,6 @@ impl<S: Read + Seek> Archive<S> {
         })
     }
 
-    /// Get an [`EasyArchive`] abstraction for easier handling of this archive.
-    pub fn easy(self) -> EasyArchive<S> {
-        EasyArchive::new(self)
-    }
-
     /// Get access to the underlying source
     pub fn source(&mut self) -> &mut Source<S> {
         &mut self.source
@@ -176,6 +174,11 @@ impl<S: Read + Seek> Archive<S> {
             .context("Provided directory ID was not found")
     }
 
+    /// Use path-based APIs
+    pub fn with_paths(&mut self) -> WithPaths<'_, S> {
+        WithPaths::new(self)
+    }
+
     /// Iterate over all items inside a directory contained inside the archive
     pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
         let dir_content = self
@@ -206,6 +209,22 @@ impl<S: Read + Seek> Archive<S> {
             file.content_len,
             file.sha3_checksum,
         ))
+    }
+
+    /// Get the content of a file contained inside the archive into a vector of bytes
+    pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
+        let mut file = self.read_file(id)?;
+
+        let mut buf = Vec::with_capacity(usize::try_from(file.file_len()).unwrap());
+        file.read_to_end(&mut buf)?;
+
+        Ok(buf)
+    }
+
+    /// Get the content of a file contained inside the archive as a string
+    pub fn read_file_to_string(&mut self, id: FileId) -> Result<String> {
+        let bytes = self.read_file_to_vec(id)?;
+        String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
     }
 
     fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
@@ -243,6 +262,81 @@ impl<S: Read + Seek> Archive<S> {
                 ItemId::Directory(_) => "Directory not found",
                 ItemId::File(_) => "File not found",
             })
+    }
+
+    /// (Internal) Compute the full path of an item inside the archive
+    ///
+    /// Used by [`Self::compute_dir_path`] and [`Self::compute_file_path`]
+    fn compute_item_path(
+        &self,
+        item_name: &ItemName,
+        first_parent_dir: DirectoryIdOrRoot,
+    ) -> String {
+        let mut components = vec![];
+
+        let mut next = first_parent_dir;
+
+        loop {
+            match next {
+                DirectoryIdOrRoot::Root => break,
+                DirectoryIdOrRoot::NonRoot(directory_id) => {
+                    let curr = self.get_dir(directory_id).unwrap();
+                    components.push(curr.name.as_ref());
+                    next = curr.parent_dir;
+                }
+            }
+        }
+
+        let predic_size =
+            components.iter().map(|c| c.len()).sum::<usize>() + components.len() + item_name.len();
+
+        let mut name = String::with_capacity(predic_size);
+
+        for component in components.iter().rev() {
+            name.push_str(component);
+            name.push('/');
+        }
+
+        name.push_str(item_name);
+
+        // Ensure the optimization was correctly performed
+        assert_eq!(name.len(), predic_size);
+
+        name
+    }
+
+    /// Compute the full path of a directory inside the archive
+    pub fn compute_dir_path(&self, dir_id: DirectoryId) -> Result<String> {
+        let dir = self
+            .get_dir(dir_id)
+            .context("Directory was not found in archive")?;
+
+        Ok(self.compute_item_path(&dir.name, dir.parent_dir))
+    }
+
+    /// Compute the full path of a file inside the archive
+    pub fn compute_file_path(&self, file_id: FileId) -> Result<String> {
+        let file = self
+            .get_file(file_id)
+            .context("File was not found in archive")?;
+
+        Ok(self.compute_item_path(&file.name, file.parent_dir))
+    }
+
+    /// Iterate over the list of files and directories
+    ///
+    /// # Ordering
+    ///
+    /// Directories are traversed, starting with the root.
+    /// When a directory is encountered, it is traversed.
+    /// This means an item will never be yielded before its parent directory.
+    ///
+    /// Parent directories are yielded before their content,
+    /// and children directories before adjacent files.
+    ///
+    /// Directories and files themselves are unordered.
+    pub fn iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
+        ArchiveIter::new(self)
     }
 }
 
@@ -691,7 +785,7 @@ impl<S: Read + Write + Seek> Archive<S> {
     /// Remove a directory, recursively
     ///
     /// Returns the removed directory entry
-    pub fn remove_directory(&mut self, id: DirectoryId) -> Result<Directory> {
+    pub fn remove_dir(&mut self, id: DirectoryId) -> Result<Directory> {
         let SegmentEntry {
             segment_index,
             entry_index,
@@ -724,7 +818,7 @@ impl<S: Read + Write + Seek> Archive<S> {
 
         // Remove sub-directories, recursively
         for sub_dir in sub_dirs {
-            self.remove_directory(sub_dir)?;
+            self.remove_dir(sub_dir)?;
         }
 
         // Remove files
@@ -835,6 +929,13 @@ pub enum ItemId {
     File(FileId),
 }
 
+#[derive(Debug)]
+pub enum ItemIdOrRoot {
+    Root,
+    NonRootDirectory(DirectoryId),
+    File(FileId),
+}
+
 enum ItemType {
     Directory,
     File,
@@ -934,5 +1035,44 @@ fn compute_dirs_content<'a>(
         Ok(names_in_dirs)
     } else {
         Err(errors)
+    }
+}
+
+impl Archive<StdFile> {
+    /// Open an archive (on disk) in read-only mode
+    pub fn open_from_file_readonly(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<Self, ArchiveDecodingError> {
+        let file = OpenOptions::new()
+            .truncate(false)
+            .read(true)
+            .write(false)
+            .open(path.as_ref())
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
+            .map_err(ArchiveDecodingError::IoError)?;
+
+        Archive::open(file, conf)
+    }
+
+    /// Open an archive (on disk) in writable mode
+    pub fn open_from_file(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<Self, ArchiveDecodingError> {
+        let file = StdFile::open(path.as_ref())
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
+            .map_err(ArchiveDecodingError::IoError)?;
+
+        Archive::open(file, conf)
+    }
+
+    /// Create an archive (on disk) in writable mode
+    pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
+        let file = StdFile::create_new(path.as_ref())
+            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
+        // .map_err(ArchiveDecodingError::IoError)?; // TODO
+
+        Archive::create(file, conf)
     }
 }

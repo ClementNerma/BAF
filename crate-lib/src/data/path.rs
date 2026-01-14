@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 
 use super::name::{ItemName, NameValidationError};
 
@@ -17,6 +17,10 @@ impl PathInArchive {
     ///
     /// Does not preserve the root symbol (`/` at the beginning of a path)
     pub fn new(path: &str) -> Result<Self> {
+        if path.is_empty() {
+            bail!("Path cannot be empty");
+        }
+
         let mut out = vec![];
 
         for component in Path::new(path).components() {

@@ -88,7 +88,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
         )?;
-        archive.remove_directory(dir)?;
+        archive.remove_dir(dir)?;
     }
 
     {
@@ -105,7 +105,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
             Cursor::new(vec![]),
         )?;
 
-        archive.remove_directory(dir)?;
+        archive.remove_dir(dir)?;
     }
 
     // Close archive, get back the source

@@ -12,7 +12,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{
-    archive::DirEntry, config::ArchiveConfig, data::timestamp::Timestamp, easy::EasyArchive,
+    archive::{Archive, DirEntry},
+    config::ArchiveConfig,
+    data::timestamp::Timestamp,
 };
 use clap::Parser;
 use walkdir::WalkDir;
@@ -40,14 +42,14 @@ fn inner_main() -> Result<()> {
                 bail!("Path {} already exists", path.display());
             }
 
-            let mut archive = EasyArchive::create_as_file(path, ArchiveConfig::default())
+            let mut archive = Archive::create_as_file(path, ArchiveConfig::default())
                 .context("Failed to create archive")?;
 
             archive.flush().context("Failed to flush the archive")?;
         }
 
         Action::List => {
-            let archive = EasyArchive::open_from_file(path, ArchiveConfig::default())
+            let archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
             for item in archive.iter() {
@@ -93,14 +95,14 @@ fn inner_main() -> Result<()> {
 
             let mut archive = if path.exists() {
                 // TODO: reserve space ahead of time for the computed number of files + dirs
-                EasyArchive::open_from_file(&path, config).map_err(|err| {
+                Archive::open_from_file(&path, config).map_err(|err| {
                     anyhow!(
                         "Failed to open archive at path '{}': {err:?}",
                         path.display()
                     ) // TODO: display instead of debug
                 })?
             } else {
-                EasyArchive::create_as_file(&path, config).with_context(|| {
+                Archive::create_as_file(&path, config).with_context(|| {
                     format!("Failed to create archive at path '{}'", path.display())
                 })?
             };
@@ -112,7 +114,9 @@ fn inner_main() -> Result<()> {
                 path_in_archive,
             } in dirs
             {
-                archive.create_directory(&path_in_archive, get_item_mtime(&real_path)?)?;
+                archive
+                    .with_paths()
+                    .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
             }
 
             for ItemToAdd {
@@ -126,7 +130,8 @@ fn inner_main() -> Result<()> {
                     .with_context(|| format!("Failed to open file: {}", real_path.display()))?;
 
                 archive
-                    .write_file(&path_in_archive, file, get_item_mtime(&real_path)?)
+                    .with_paths()
+                    .write_file_at(&path_in_archive, file, get_item_mtime(&real_path)?)
                     .context("Failed to add file to archive")?;
             }
 

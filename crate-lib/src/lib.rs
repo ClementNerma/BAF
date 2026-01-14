@@ -11,10 +11,10 @@
 pub mod archive;
 pub mod config;
 pub mod data;
-pub mod easy;
-pub mod easy_iter;
 pub mod file_reader;
+pub mod iter;
 pub mod source;
+pub mod with_paths;
 
 mod coverage;
 
