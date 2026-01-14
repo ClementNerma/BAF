@@ -14,8 +14,8 @@ use super::{
     timestamp::Timestamp,
 };
 
-pub static FILE_ENTRY_SIZE: usize = 328;
-pub static FILE_NAME_OFFSET_IN_ENTRY: usize = 16;
+pub(crate) static FILE_ENTRY_SIZE: usize = 328;
+pub(crate) static FILE_NAME_OFFSET_IN_ENTRY: usize = 16;
 
 /// Representation of a file inside an archive
 #[derive(Debug, Clone)]

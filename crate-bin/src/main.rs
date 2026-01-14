@@ -11,11 +11,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use baf::{
-    archive::{Archive, DirEntry},
-    config::ArchiveConfig,
-    data::timestamp::Timestamp,
-};
+use baf::{Archive, ArchiveConfig, DirEntry, Timestamp};
 use clap::Parser;
 use walkdir::WalkDir;
 

@@ -1,10 +1,8 @@
 use std::io::Cursor;
 
 use crate::{
-    archive::Archive,
-    config::ArchiveConfig,
+    Archive, ArchiveConfig, DirectoryIdOrRoot, ItemName, Timestamp,
     coverage::{Coverage, Segment},
-    data::{directory::DirectoryIdOrRoot, name::ItemName, timestamp::Timestamp},
 };
 
 #[test]

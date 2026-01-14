@@ -16,8 +16,8 @@ use super::{
     timestamp::Timestamp,
 };
 
-pub static DIRECTORY_ENTRY_SIZE: usize = 280;
-pub static DIRECTORY_NAME_OFFSET_IN_ENTRY: usize = 16;
+pub(crate) static DIRECTORY_ENTRY_SIZE: usize = 280;
+pub(crate) static DIRECTORY_NAME_OFFSET_IN_ENTRY: usize = 16;
 
 /// Representation of a directory inside an archive
 #[derive(Debug, Clone)]

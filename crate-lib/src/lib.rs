@@ -8,18 +8,34 @@
 #![forbid(unused_must_use)]
 #![warn(unused_crate_dependencies)]
 
-pub mod archive;
-pub mod config;
-pub mod data;
-pub mod file_reader;
-pub mod iter;
-pub mod source;
-pub mod with_paths;
-
+mod archive;
+mod config;
 mod coverage;
+mod data;
+mod file_reader;
+mod iter;
+mod source;
+mod with_paths;
 
 #[cfg(test)]
 mod tests;
+
+// Re-export useful types directly from the root
+pub use self::{
+    archive::{Archive, ArchiveDecodingError, ArchiveDuplicateItemNameError, DirEntry, ItemId},
+    config::ArchiveConfig,
+    data::{
+        directory::{Directory, DirectoryDecodingError, DirectoryId, DirectoryIdOrRoot},
+        file::{File, FileDecodingError, FileId},
+        name::{ItemName, NameDecodingError, NameDecodingErrorReason, NameValidationError},
+        path::PathInArchive,
+        timestamp::Timestamp,
+    },
+    file_reader::FileReader,
+    iter::ArchiveIter,
+    source::Source,
+    with_paths::{ItemIdOrRoot, WithPaths},
+};
 
 /// This macro is used to ensure, at compile-time, that only one single
 /// version of the BAF archives are supported.

@@ -929,13 +929,6 @@ pub enum ItemId {
     File(FileId),
 }
 
-#[derive(Debug)]
-pub enum ItemIdOrRoot {
-    Root,
-    NonRootDirectory(DirectoryId),
-    File(FileId),
-}
-
 enum ItemType {
     Directory,
     File,

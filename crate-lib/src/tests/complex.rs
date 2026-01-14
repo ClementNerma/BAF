@@ -9,14 +9,7 @@ use anyhow::Result;
 use tempfile::NamedTempFile;
 
 use crate::{
-    archive::{Archive, DirEntry},
-    config::ArchiveConfig,
-    data::{
-        directory::{DirectoryId, DirectoryIdOrRoot},
-        file::FileId,
-        name::ItemName,
-        timestamp::Timestamp,
-    },
+    Archive, ArchiveConfig, DirEntry, DirectoryId, DirectoryIdOrRoot, FileId, ItemName, Timestamp,
 };
 
 static FILE_CONTENT: &[u8] = b"Hello world!";

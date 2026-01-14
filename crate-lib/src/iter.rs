@@ -71,7 +71,7 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
     }
 }
 
-pub enum IterState<'a, R: Read + Seek> {
+enum IterState<'a, R: Read + Seek> {
     Dirs {
         curr: Option<Box<ArchiveIter<'a, R>>>,
         next: std::collections::hash_set::IntoIter<DirectoryId>,

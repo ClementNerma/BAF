@@ -6,7 +6,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::{
-    archive::{Archive, DirEntry, ItemIdOrRoot},
+    FileId,
+    archive::{Archive, DirEntry},
     data::{
         directory::{Directory, DirectoryId, DirectoryIdOrRoot},
         file::File,
@@ -242,4 +243,11 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
 
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub enum ItemIdOrRoot {
+    Root,
+    NonRootDirectory(DirectoryId),
+    File(FileId),
 }
