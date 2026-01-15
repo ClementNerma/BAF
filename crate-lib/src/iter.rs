@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-/// See [`Archive::iter`]
+/// See [`Archive::ordered_iter`] and [`Archive::unordered_iter`]
 pub struct ArchiveIter<'a, R: Read + Seek> {
     archive: &'a Archive<R>,
     dir_id: DirectoryIdOrRoot,
@@ -28,8 +28,8 @@ impl<'a, R: Read + Seek> ArchiveIter<'a, R> {
         dir_id: DirectoryIdOrRoot,
         ordered: bool,
     ) -> Result<Self> {
-        let dirs = archive
-            .get_children_dirs_of(dir_id)
+        let (dirs, _) = archive
+            .get_dir_content(dir_id)
             .context("Provided directory ID was not found")?;
 
         let mut dirs = dirs.iter().copied().collect::<Vec<_>>();
@@ -74,7 +74,7 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
                         Some(DirEntry::Directory(self.archive.get_dir(next).unwrap()))
                     }
                     None => {
-                        let files = self.archive.get_children_files_of(self.dir_id).unwrap();
+                        let (_, files) = self.archive.get_dir_content(self.dir_id).unwrap();
 
                         let mut files = files.iter().copied().collect::<Vec<_>>();
 

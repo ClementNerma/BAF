@@ -44,6 +44,7 @@ pub use self::{
 /// This allows to simplify code by not dealing with different versions.
 ///
 /// This will be removed when multiple versions will exist.
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ensure_only_one_version {
     ($version: expr) => {

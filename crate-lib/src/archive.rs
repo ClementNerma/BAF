@@ -145,23 +145,28 @@ impl<S: Read + Seek> Archive<S> {
         WithPaths::new(self)
     }
 
-    /// Get the list of all children directories inside the provided directory
-    pub fn get_children_dirs_of(&self, id: DirectoryIdOrRoot) -> Result<&HashSet<DirectoryId>> {
-        self.dirs_content
+    /// Get the list of all children directories and files inside the provided directory
+    ///
+    /// This method returns IDs ; to get iterators instead, use [`Self::read_dir`]
+    pub fn get_dir_content(
+        &self,
+        id: DirectoryIdOrRoot,
+    ) -> Result<(&HashSet<DirectoryId>, &HashSet<FileId>)> {
+        let DirContent {
+            dirs,
+            files,
+            names: _,
+        } = self
+            .dirs_content
             .get(&id)
-            .map(|content| &content.dirs)
-            .context("Provided directory ID was not found")
-    }
+            .context("Provided directory ID was not found")?;
 
-    /// Get the list of all children files inside the provided directory
-    pub fn get_children_files_of(&self, id: DirectoryIdOrRoot) -> Result<&HashSet<FileId>> {
-        self.dirs_content
-            .get(&id)
-            .map(|content| &content.files)
-            .context("Provided directory ID was not found")
+        Ok((dirs, files))
     }
 
     /// Iterate over all items inside a directory contained inside the archive
+    ///
+    /// If you only need IDs, you can get them directly in a [`HashSet`] by using [`Self::get_dir_content`]
     pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
         let dir_content = self
             .dirs_content
