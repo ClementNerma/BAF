@@ -15,6 +15,7 @@ pub struct CmdArgs {
 pub enum Action {
     Create,
 
+    #[clap(alias = "ls")]
     List,
 
     Add {
