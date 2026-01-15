@@ -27,5 +27,12 @@ pub enum Action {
             help = "Directory to add the items into in the archive"
         )]
         under_dir: Option<String>,
+
+        #[clap(
+            short = 'd',
+            long,
+            help = "Display the path and size of each added file"
+        )]
+        detailed: bool,
     },
 }

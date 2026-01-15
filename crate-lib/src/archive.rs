@@ -536,10 +536,11 @@ impl<S: Read + Write + Seek> Archive<S> {
             Ok(())
         } else {
             bail!(
-                "Name '{name}' is already used in {}",
+                "An item named '{name}' already exists in {}",
                 match parent_dir {
                     DirectoryIdOrRoot::Root => "root directory".to_owned(),
-                    DirectoryIdOrRoot::NonRoot(id) => format!("parent directory with ID {id:?}",),
+                    DirectoryIdOrRoot::NonRoot(id) =>
+                        format!("parent directory '{}'", self.get_dir(id).unwrap().name),
                 }
             );
         }

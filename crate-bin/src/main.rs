@@ -3,6 +3,7 @@
 #![warn(unused_crate_dependencies)]
 
 use std::{
+    collections::HashMap,
     fs::{self, File},
     num::NonZero,
     path::{Path, PathBuf},
@@ -56,7 +57,7 @@ fn inner_main() -> Result<()> {
 
                     DirEntry::File(file) => {
                         println!(
-                            "|> {} ({} bytes)",
+                            "|> {} ({})",
                             archive.compute_file_path(file.id).unwrap(),
                             human_size(file.content_len, Some(2)),
                         );
@@ -68,6 +69,7 @@ fn inner_main() -> Result<()> {
         Action::Add {
             items_path,
             under_dir,
+            detailed,
         } => {
             for item_path in &items_path {
                 if !item_path.exists() {
@@ -103,7 +105,7 @@ fn inner_main() -> Result<()> {
                 })?
             };
 
-            println!("> Creating {} directories in archive...", dirs.len());
+            println!("Creating {} directories in archive...", dirs.len());
 
             for ItemToAdd {
                 real_path,
@@ -115,23 +117,54 @@ fn inner_main() -> Result<()> {
                     .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
             }
 
+            let files_size = files
+                .iter()
+                .map(|file| {
+                    file.real_path
+                        .metadata()
+                        .map(|mt| (&file.real_path, mt.len()))
+                        .with_context(|| {
+                            format!(
+                                "Failed to get metadata about file: {}",
+                                file.real_path.display()
+                            )
+                        })
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?;
+
+            assert_eq!(files.len(), files_size.len());
+
+            println!(
+                "Adding {} files (total: {})",
+                files.len(),
+                human_size(files_size.values().sum::<u64>(), Some(2))
+            );
+
             for ItemToAdd {
                 real_path,
                 path_in_archive,
-            } in files
+            } in &files
             {
-                println!("> Adding file: {}", real_path.display());
+                if detailed {
+                    println!(
+                        "> Adding file: {} ({})",
+                        real_path.display(),
+                        human_size(*files_size.get(&real_path).unwrap(), Some(2))
+                    );
+                }
 
-                let file = File::open(&real_path)
+                let file = File::open(real_path)
                     .with_context(|| format!("Failed to open file: {}", real_path.display()))?;
 
                 archive
                     .with_paths()
-                    .write_file_at(&path_in_archive, file, get_item_mtime(&real_path)?)
+                    .write_file_at(path_in_archive, file, get_item_mtime(real_path)?)
                     .context("Failed to add file to archive")?;
             }
 
             archive.flush().context("Failed to close archive")?;
+
+            println!("Done!");
         }
     }
 
