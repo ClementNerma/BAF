@@ -15,25 +15,40 @@ pub struct ArchiveIter<'a, R: Read + Seek> {
     archive: &'a Archive<R>,
     dir_id: DirectoryIdOrRoot,
     state: IterState<'a, R>,
+    ordered: bool,
 }
 
 impl<'a, R: Read + Seek> ArchiveIter<'a, R> {
-    pub(crate) fn new(archive: &'a Archive<R>) -> Self {
-        Self::new_for_dir(archive, DirectoryIdOrRoot::Root).unwrap()
+    pub(crate) fn new(archive: &'a Archive<R>, ordered: bool) -> Self {
+        Self::new_for_dir(archive, DirectoryIdOrRoot::Root, ordered).unwrap()
     }
 
-    fn new_for_dir(archive: &'a Archive<R>, dir_id: DirectoryIdOrRoot) -> Result<Self> {
+    fn new_for_dir(
+        archive: &'a Archive<R>,
+        dir_id: DirectoryIdOrRoot,
+        ordered: bool,
+    ) -> Result<Self> {
         let dirs = archive
             .get_children_dirs_of(dir_id)
             .context("Provided directory ID was not found")?;
+
+        let mut dirs = dirs.iter().copied().collect::<Vec<_>>();
+
+        if ordered {
+            dirs.sort_by_key(|dir_id| &archive.get_dir(*dir_id).unwrap().name);
+        }
+
+        // We .pop() from the Vec<_> during iteration
+        dirs.reverse();
 
         Ok(Self {
             archive,
             dir_id,
             state: IterState::Dirs {
                 curr: None,
-                next: dirs.clone().into_iter(),
+                next: dirs,
             },
+            ordered,
         })
     }
 }
@@ -45,12 +60,13 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
         match &mut self.state {
             IterState::Dirs { curr, next } => match curr.as_mut().and_then(|curr| curr.next()) {
                 Some(item) => Some(item),
-                None => match next.next() {
+                None => match next.pop() {
                     Some(next) => {
                         *curr = Some(Box::new(
                             ArchiveIter::new_for_dir(
                                 self.archive,
                                 DirectoryIdOrRoot::NonRoot(next),
+                                self.ordered,
                             )
                             .unwrap(),
                         ));
@@ -59,14 +75,26 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
                     }
                     None => {
                         let files = self.archive.get_children_files_of(self.dir_id).unwrap();
-                        self.state = IterState::Files(files.clone().into_iter());
+
+                        let mut files = files.iter().copied().collect::<Vec<_>>();
+
+                        if self.ordered {
+                            files.sort_by_key(|file_id| {
+                                &self.archive.get_file(*file_id).unwrap().name
+                            });
+                        }
+
+                        // We .pop() from the Vec<_> during iteration
+                        files.reverse();
+
+                        self.state = IterState::Files(files);
                         self.next()
                     }
                 },
             },
 
             IterState::Files(files) => files
-                .next()
+                .pop()
                 .map(|file_id| DirEntry::File(self.archive.get_file(file_id).unwrap())),
         }
     }
@@ -75,7 +103,7 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
 enum IterState<'a, R: Read + Seek> {
     Dirs {
         curr: Option<Box<ArchiveIter<'a, R>>>,
-        next: std::collections::hash_set::IntoIter<DirectoryId>,
+        next: Vec<DirectoryId>,
     },
-    Files(std::collections::hash_set::IntoIter<FileId>),
+    Files(Vec<FileId>),
 }

@@ -328,9 +328,18 @@ impl<S: Read + Seek> Archive<S> {
     /// Parent directories are yielded before their content,
     /// and children directories before adjacent files.
     ///
-    /// Directories and files themselves are unordered.
-    pub fn iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
-        ArchiveIter::new(self)
+    /// Directories and files themselves are unordered. Note that the exact
+    /// order you get may also change between two runs.
+    pub fn unordered_iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
+        ArchiveIter::new(self, false)
+    }
+
+    /// Equivalent to [`Self::unordered_iter`] but directories' content is sorted
+    /// in ascending name order (UTF-8-aware sorting)
+    ///
+    /// There is a small performance cost as all items must be sorted.
+    pub fn ordered_iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
+        ArchiveIter::new(self, true)
     }
 }
 
