@@ -115,7 +115,7 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
 
         self.archive
             .create_dir(parent_dir, filename, modif_time)
-            .context("Failed to create file")
+            .context("Failed to create directory")
     }
 
     /// Get or create a directory at the provided path
