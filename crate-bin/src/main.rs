@@ -48,15 +48,15 @@ fn inner_main() -> Result<()> {
             let archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            for item in archive.iter() {
+            for item in archive.ordered_iter() {
                 match item {
                     DirEntry::Directory(directory) => {
-                        println!("[Dir ] {}", archive.compute_dir_path(directory.id).unwrap());
+                        println!("|  {}/", archive.compute_dir_path(directory.id).unwrap());
                     }
 
                     DirEntry::File(file) => {
                         println!(
-                            "[File] {} ({} bytes)",
+                            "|> {} ({} bytes)",
                             archive.compute_file_path(file.id).unwrap(),
                             human_size(file.content_len, Some(2)),
                         );
