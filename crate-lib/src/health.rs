@@ -11,18 +11,19 @@ pub fn check_file_table_correctness(
     segments: &[FileTableSegment],
 ) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<FtCorrectnessError>> {
     let mut errors = vec![];
-    let mut dir_ids = HashSet::with_capacity(segments.iter().map(|s| s.dirs.len()).sum());
+    let mut dirs_content = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
 
     for dir in segments.iter().flat_map(|segment| &segment.dirs).flatten() {
-        if !dir_ids.insert(dir.id) {
+        if dirs_content
+            .insert(DirectoryIdOrRoot::NonRoot(dir.id), DirContent::default())
+            .is_some()
+        {
             errors.push(FtCorrectnessError::DuplicateDirectoryId {
                 faulty_dir_id: dir.id,
                 faulty_dir_name: dir.name.clone(),
             });
         }
     }
-
-    let mut dirs_content = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
 
     for dir in segments.iter().flat_map(|segment| &segment.dirs).flatten() {
         let parent_dir_content = match dir.parent_dir {
