@@ -40,7 +40,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
     let mut archive = Archive::create(source, ArchiveConfig::default()).unwrap();
 
     let directory_id = archive
-        .create_directory(
+        .create_dir(
             DirectoryIdOrRoot::Root,
             ItemName::new("dir".to_owned()).unwrap(),
             Timestamp::now(),
@@ -76,7 +76,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
         )?;
         archive.remove_file(file)?;
 
-        let dir = archive.create_directory(
+        let dir = archive.create_dir(
             DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),
@@ -85,7 +85,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
     }
 
     {
-        let dir = archive.create_directory(
+        let dir = archive.create_dir(
             DirectoryIdOrRoot::Root,
             ItemName::new("should be removed".to_owned()).unwrap(),
             Timestamp::now(),

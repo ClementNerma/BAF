@@ -539,7 +539,7 @@ impl<S: Read + Write + Seek> Archive<S> {
     /// Create a new directory
     ///
     /// Modification time is in seconds since Unix' Epoch
-    pub fn create_directory(
+    pub fn create_dir(
         &mut self,
         parent_dir: DirectoryIdOrRoot,
         name: ItemName,

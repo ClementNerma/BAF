@@ -114,7 +114,7 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
         };
 
         self.archive
-            .create_directory(parent_dir, filename, modif_time)
+            .create_dir(parent_dir, filename, modif_time)
             .context("Failed to create file")
     }
 
@@ -145,7 +145,7 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
                     bail!("Cannot crate path '{path}' in archive: '{curr_path}' is a file",)
                 }
                 None => {
-                    let dir_id = self.archive.create_directory(
+                    let dir_id = self.archive.create_dir(
                         curr_id,
                         segment.clone(),
                         Timestamp::from(SystemTime::now()),
