@@ -1,13 +1,13 @@
-use std::{
-    fmt::Display,
-    path::{Component, Path},
-};
+use std::fmt::Display;
 
 use anyhow::{Result, anyhow, bail};
 
 use super::name::{ItemName, NameValidationError};
 
 // TODO: this is not super efficient as this requires lots of unnecessary allocations
+/// Representation of a path inside an archive
+///
+/// Similar to [`std::path::PathBuf`], but only made of components compatible with [`ItemName`]'s rules
 pub struct PathInArchive(Vec<ItemName>);
 
 impl PathInArchive {
@@ -23,19 +23,23 @@ impl PathInArchive {
 
         let mut out = vec![];
 
-        for component in Path::new(path).components() {
+        for component in path.split('/') {
             match component {
-                Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+                // Empty components (e.g. before root ; two slashes together ; after trailing slash)
+                "" => continue,
 
-                Component::ParentDir => {
+                // Current directory
+                "." => {}
+
+                // Parent directory
+                ".." => {
                     out.pop();
                 }
 
-                Component::Normal(normal) => {
-                    let str = normal.to_str().unwrap();
-
-                    out.push(ItemName::new(str.to_owned()).map_err(|err| {
-                        anyhow!("In path '{path}': component '{str}' is invalid: {err}")
+                // Normal component
+                _ => {
+                    out.push(ItemName::new(component.to_owned()).map_err(|err| {
+                        anyhow!("In path '{path}': component '{component}' is invalid: {err}")
                     })?);
                 }
             }
@@ -44,8 +48,8 @@ impl PathInArchive {
         Ok(Self(out))
     }
 
+    // TODO: unnecessarily allocates
     /// Create a path from a suite of components
-    /// TODO: unnecessarily allocates
     pub fn from_components(components: &[&str]) -> Result<Self> {
         Self::new(&components.join("/"))
     }

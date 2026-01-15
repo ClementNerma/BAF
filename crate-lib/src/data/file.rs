@@ -103,7 +103,7 @@ impl File {
         }))
     }
 
-    pub fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let Self {
             id,
             parent_dir,
@@ -136,11 +136,16 @@ impl File {
     }
 }
 
-// TODO: docs
+/// Error while decoding a file's informations
 #[derive(Debug)]
 pub enum FileDecodingError {
+    /// Native I/O error
     IoError(anyhow::Error),
+
+    /// The entry is invalid
     InvalidEntry(anyhow::Error),
+
+    /// The file's name is invalid
     InvalidName(NameDecodingError),
 }
 

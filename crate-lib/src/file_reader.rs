@@ -28,6 +28,7 @@ impl<'a, S: Read> FileReader<'a, S> {
         }
     }
 
+    /// Get the file's length, in bytes
     pub fn file_len(&self) -> u64 {
         self.len
     }

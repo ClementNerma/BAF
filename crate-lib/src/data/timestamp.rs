@@ -7,15 +7,19 @@ use anyhow::Result;
 
 use crate::source::{FromSourceBytes, Source};
 
+/// Representation of a timestamp
+///
+/// Stores the number of seconds elapsed since Unix's EPOCH
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(u64);
 
 impl Timestamp {
+    /// Get the current timestamp
     pub fn now() -> Self {
         Self::from(SystemTime::now())
     }
 
-    pub fn encode(&self) -> [u8; 8] {
+    pub(crate) fn encode(&self) -> [u8; 8] {
         self.0.to_le_bytes()
     }
 }

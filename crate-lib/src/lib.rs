@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![forbid(unused_must_use)]
 #![warn(unused_crate_dependencies)]
+#![warn(missing_docs)]
 
 mod archive;
 mod config;
@@ -23,7 +24,7 @@ mod tests;
 
 // Re-export useful types directly from the root
 pub use self::{
-    archive::{Archive, ArchiveDecodingError, DirEntry, ItemId},
+    archive::{Archive, ArchiveMetadataDecodingError, DirEntry, ItemId},
     config::ArchiveConfig,
     data::{
         directory::{Directory, DirectoryDecodingError, DirectoryId, DirectoryIdOrRoot},
@@ -33,7 +34,7 @@ pub use self::{
         timestamp::Timestamp,
     },
     file_reader::FileReader,
-    health::FtCorrectnessError,
+    health::FileTableCorrectnessError,
     iter::ArchiveIter,
     with_paths::{ItemIdOrRoot, WithPaths},
 };

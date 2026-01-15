@@ -24,7 +24,7 @@ use crate::{
         timestamp::Timestamp,
     },
     file_reader::FileReader,
-    health::{DirContent, FtCorrectnessError, check_file_table_correctness},
+    health::{DirContent, FileTableCorrectnessError, check_file_table_correctness},
     iter::ArchiveIter,
     source::Source,
     with_paths::WithPaths,
@@ -52,21 +52,21 @@ impl<S: Read + Seek> Archive<S> {
     /// May return a set of warnings about ill-formed archives
     ///
     /// Will read the entire archive's metadata segments before returning.
-    pub fn open(source: S, conf: ArchiveConfig) -> Result<Self, ArchiveDecodingError> {
+    pub fn open(source: S, conf: ArchiveConfig) -> Result<Self, ArchiveMetadataDecodingError> {
         let mut source = Source::new(source);
 
         let mut source_with_header =
-            Header::decode(&mut source).map_err(ArchiveDecodingError::InvalidHeader)?;
+            Header::decode(&mut source).map_err(ArchiveMetadataDecodingError::InvalidHeader)?;
         let header = source_with_header.header;
 
         let mut file_segments = vec![];
         let mut file_segments_addr = vec![HEADER_SIZE as u64];
         let mut prev_segment = FileTableSegment::decode(&mut source_with_header)
-            .map_err(ArchiveDecodingError::InvalidFileTableSegment)?;
+            .map_err(ArchiveMetadataDecodingError::InvalidFileTableSegment)?;
 
         while let Some(next_segment) = prev_segment.consume_next_segment(&mut source_with_header) {
             let next_segment =
-                next_segment.map_err(ArchiveDecodingError::InvalidFileTableSegment)?;
+                next_segment.map_err(ArchiveMetadataDecodingError::InvalidFileTableSegment)?;
 
             file_segments.push(prev_segment);
 
@@ -83,7 +83,9 @@ impl<S: Read + Seek> Archive<S> {
                 .iter()
                 .enumerate()
                 .map(|(i, segment)| (*file_segments_addr.get(i).unwrap(), segment)),
-            source.seek_len().map_err(ArchiveDecodingError::IoError)?,
+            source
+                .seek_len()
+                .map_err(ArchiveMetadataDecodingError::IoError)?,
         );
 
         let dirs = file_segments
@@ -101,7 +103,7 @@ impl<S: Read + Seek> Archive<S> {
             .collect::<HashMap<_, _>>();
 
         let dirs_content = check_file_table_correctness(&file_segments)
-            .map_err(ArchiveDecodingError::FileTableCorrectnessError)?;
+            .map_err(ArchiveMetadataDecodingError::FileTableCorrectnessError)?;
 
         Ok(Self {
             source,
@@ -923,14 +925,14 @@ impl Archive<StdFile> {
     pub fn open_from_file_readonly(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
-    ) -> Result<Self, ArchiveDecodingError> {
+    ) -> Result<Self, ArchiveMetadataDecodingError> {
         let file = OpenOptions::new()
             .truncate(false)
             .read(true)
             .write(false)
             .open(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
-            .map_err(ArchiveDecodingError::IoError)?;
+            .map_err(ArchiveMetadataDecodingError::IoError)?;
 
         Archive::open(file, conf)
     }
@@ -939,10 +941,10 @@ impl Archive<StdFile> {
     pub fn open_from_file(
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
-    ) -> Result<Self, ArchiveDecodingError> {
+    ) -> Result<Self, ArchiveMetadataDecodingError> {
         let file = StdFile::open(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
-            .map_err(ArchiveDecodingError::IoError)?;
+            .map_err(ArchiveMetadataDecodingError::IoError)?;
 
         Archive::open(file, conf)
     }
@@ -957,17 +959,29 @@ impl Archive<StdFile> {
     }
 }
 
+/// Error while decoding an archive's metadata
 #[derive(Debug)]
-pub enum ArchiveDecodingError {
+pub enum ArchiveMetadataDecodingError {
+    /// Native I/O error
     IoError(anyhow::Error),
-    FileTableCorrectnessError(Vec<FtCorrectnessError>),
+
+    /// Header is invalid
     InvalidHeader(anyhow::Error),
+
+    /// One of the file tables' segments is invalid
     InvalidFileTableSegment(FileTableSegmentDecodingError),
+
+    /// The file table contains some incorrect data
+    FileTableCorrectnessError(Vec<FileTableCorrectnessError>),
 }
 
+/// ID of an item, unique inside a given archive
 #[derive(Debug)]
 pub enum ItemId {
+    /// ID of a directory
     Directory(DirectoryId),
+
+    /// ID of a file
     File(FileId),
 }
 
@@ -985,11 +999,15 @@ struct SegmentEntry {
 /// Entry in a directory
 #[derive(Debug, Clone)]
 pub enum DirEntry<'a> {
+    /// Child directory
     Directory(&'a Directory),
+
+    /// Child file
     File(&'a File),
 }
 
 impl<'a> DirEntry<'a> {
+    /// Get the item's name
     pub fn name(&self) -> &ItemName {
         match self {
             DirEntry::Directory(dir) => &dir.name,

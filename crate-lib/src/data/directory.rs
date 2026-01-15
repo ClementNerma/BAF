@@ -79,8 +79,7 @@ impl Directory {
         }))
     }
 
-    /// Encode as a raw directory entry
-    pub fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let Self {
             id,
             parent_dir,
@@ -107,11 +106,16 @@ impl Directory {
     }
 }
 
-// TODO: docs
+/// Error while decoding a directory's informations
 #[derive(Debug)]
 pub enum DirectoryDecodingError {
+    /// Native I/O error
     IoError(anyhow::Error),
+
+    /// The entry is invalid
     InvalidEntry(anyhow::Error),
+
+    /// The directory's name is invalid
     InvalidName(NameDecodingError),
 }
 
@@ -128,7 +132,10 @@ impl DirectoryId {
 /// ID of a directory, unique inside a given archive
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DirectoryIdOrRoot {
+    /// Root directory
     Root,
+
+    /// Non-root directory
     NonRoot(DirectoryId),
 }
 

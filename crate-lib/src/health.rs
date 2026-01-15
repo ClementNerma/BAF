@@ -9,7 +9,7 @@ use crate::{
 // TODO: return computed DirContent
 pub fn check_file_table_correctness(
     segments: &[FileTableSegment],
-) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<FtCorrectnessError>> {
+) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<FileTableCorrectnessError>> {
     let mut errors = vec![];
     let mut dirs_content = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
 
@@ -18,7 +18,7 @@ pub fn check_file_table_correctness(
             .insert(DirectoryIdOrRoot::NonRoot(dir.id), DirContent::default())
             .is_some()
         {
-            errors.push(FtCorrectnessError::DuplicateDirectoryId {
+            errors.push(FileTableCorrectnessError::DuplicateDirectoryId {
                 faulty_dir_id: dir.id,
                 faulty_dir_name: dir.name.clone(),
             });
@@ -36,7 +36,7 @@ pub fn check_file_table_correctness(
         assert!(parent_dir_content.dirs.insert(dir.id));
 
         if !parent_dir_content.names.insert(dir.name.clone()) {
-            errors.push(FtCorrectnessError::DuplicateItemInDirName {
+            errors.push(FileTableCorrectnessError::DuplicateItemInDirName {
                 faulty_item_id: ItemId::Directory(dir.id),
                 faulty_item_name: dir.name.clone(),
                 parent_dir_id: dir.parent_dir,
@@ -55,7 +55,7 @@ pub fn check_file_table_correctness(
         assert!(parent_dir_content.files.insert(file.id));
 
         if !parent_dir_content.names.insert(file.name.clone()) {
-            errors.push(FtCorrectnessError::DuplicateItemInDirName {
+            errors.push(FileTableCorrectnessError::DuplicateItemInDirName {
                 faulty_item_id: ItemId::File(file.id),
                 faulty_item_name: file.name.clone(),
                 parent_dir_id: file.parent_dir,
@@ -70,16 +70,27 @@ pub fn check_file_table_correctness(
     }
 }
 
+/// Error while validating the correctness of an archive's file table
 #[derive(Debug)]
-pub enum FtCorrectnessError {
+pub enum FileTableCorrectnessError {
+    /// At least two directories have the same ID
     DuplicateDirectoryId {
+        /// Second directory to use the ID
         faulty_dir_id: DirectoryId,
+
+        /// Second directory's name
         faulty_dir_name: ItemName,
     },
 
+    /// At least two items have the same name in the same parent directory
     DuplicateItemInDirName {
+        /// Second item to use the name
         faulty_item_id: ItemId,
+
+        /// Second item's name
         faulty_item_name: ItemName,
+
+        /// ID of the faulty items' parent directory
         parent_dir_id: DirectoryIdOrRoot,
     },
 }

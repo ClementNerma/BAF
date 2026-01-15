@@ -17,6 +17,7 @@ use crate::{
     file_reader::FileReader,
 };
 
+/// Allows manipulating an archive using human-readable paths instead of IDs
 pub struct WithPaths<'a, S: Read + Seek> {
     archive: &'a mut Archive<S>,
 }
@@ -245,9 +246,15 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
     }
 }
 
+/// ID of an item, or root ; unique inside a given archive
 #[derive(Debug)]
 pub enum ItemIdOrRoot {
+    /// Archive's root
     Root,
+
+    /// ID of a non-root directory
     NonRootDirectory(DirectoryId),
+
+    /// ID of a file
     File(FileId),
 }
