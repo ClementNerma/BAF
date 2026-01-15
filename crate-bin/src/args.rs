@@ -18,6 +18,8 @@ pub enum Action {
     #[clap(alias = "ls")]
     List,
 
+    Tree,
+
     Add {
         #[clap(help = "Items to add (files or directories)")]
         items_path: Vec<PathBuf>,

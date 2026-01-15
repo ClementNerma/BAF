@@ -16,9 +16,13 @@ use baf::{Archive, ArchiveConfig, DirEntry, Timestamp};
 use clap::Parser;
 use walkdir::WalkDir;
 
-use self::args::{Action, CmdArgs};
+use self::{
+    args::{Action, CmdArgs},
+    tree::ArchiveContentTree,
+};
 
 mod args;
+mod tree;
 
 fn main() -> ExitCode {
     match inner_main() {
@@ -64,6 +68,13 @@ fn inner_main() -> Result<()> {
                     }
                 }
             }
+        }
+
+        Action::Tree => {
+            let archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
+                .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
+
+            println!("{}", ArchiveContentTree::build(&archive));
         }
 
         Action::Add {
