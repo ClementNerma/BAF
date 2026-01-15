@@ -140,16 +140,9 @@ impl<S: Read + Seek> Archive<S> {
         self.files.get(&id)
     }
 
-    fn segment_addr(&self, segment_index: usize) -> u64 {
-        assert!(segment_index < self.file_segments.len());
-
-        if segment_index == 0 {
-            HEADER_SIZE as u64
-        } else {
-            self.file_segments[segment_index - 1]
-                .next_segment_addr
-                .unwrap()
-        }
+    /// Use path-based APIs
+    pub fn with_paths(&mut self) -> WithPaths<'_, S> {
+        WithPaths::new(self)
     }
 
     /// Get the list of all children directories inside the provided directory
@@ -166,11 +159,6 @@ impl<S: Read + Seek> Archive<S> {
             .get(&id)
             .map(|content| &content.files)
             .context("Provided directory ID was not found")
-    }
-
-    /// Use path-based APIs
-    pub fn with_paths(&mut self) -> WithPaths<'_, S> {
-        WithPaths::new(self)
     }
 
     /// Iterate over all items inside a directory contained inside the archive
@@ -219,43 +207,6 @@ impl<S: Read + Seek> Archive<S> {
     pub fn read_file_to_string(&mut self, id: FileId) -> Result<String> {
         let bytes = self.read_file_to_vec(id)?;
         String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
-    }
-
-    fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
-        self.file_segments
-            .iter()
-            .enumerate()
-            .find_map(|(segment_index, segment)| {
-                let entry_index = match item_id {
-                    ItemId::Directory(id) => {
-                        segment.dirs.iter().flatten().position(|dir| dir.id == id)
-                    }
-
-                    ItemId::File(id) => segment
-                        .files
-                        .iter()
-                        .flatten()
-                        .position(|file| file.id == id),
-                };
-
-                entry_index.map(|entry_index| {
-                    let entry_index_u32 = u32::try_from(entry_index).unwrap();
-
-                    SegmentEntry {
-                        segment_index,
-                        entry_index,
-                        entry_addr: self.segment_addr(segment_index)
-                            + match item_id {
-                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32),
-                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32),
-                            },
-                    }
-                })
-            })
-            .context(match item_id {
-                ItemId::Directory(_) => "Directory not found",
-                ItemId::File(_) => "File not found",
-            })
     }
 
     /// (Internal) Compute the full path of an item inside the archive
@@ -387,163 +338,6 @@ impl<S: Read + Write + Seek> Archive<S> {
             file_segments: vec![segment],
             source,
         })
-    }
-
-    /// Write some data (file table segment, file content, etc.) wherever there is some free space
-    fn write_data_where_possible(
-        &mut self,
-        mut data: Source<impl Read + Seek>,
-    ) -> Result<(u64, Sha3_256)> {
-        let len = data.seek_len()?;
-
-        let (addr, growing) = match self.coverage.find_free_zone_for(len) {
-            Some(segment) => (segment.start, false),
-            None => (self.coverage.next_writable_addr(), true),
-        };
-
-        data.set_position(0)?;
-        self.source.set_position(addr)?;
-
-        let mut checksum = Sha3_256::new();
-        let mut written = 0;
-
-        // Progressively write the data using 4KB chunks and compute the checksum in the meantime
-        const CHUNK_SIZE: usize = 4096;
-
-        while written < len {
-            let mut buf = [0; CHUNK_SIZE];
-            let len = (CHUNK_SIZE as u64).min(len - written);
-            let len_usize = usize::try_from(len).unwrap();
-            data.read_exact(&mut buf[0..len_usize])?;
-
-            let data = &buf[0..len_usize];
-
-            self.source.write_all(data)?;
-            written += len;
-            checksum.update(data);
-        }
-
-        if growing {
-            self.coverage.grow_to(self.source.seek_len()?);
-        }
-
-        self.coverage.mark_as_used(addr, len);
-
-        Ok((addr, checksum))
-    }
-
-    // returns address of first entry
-    fn create_segment(&mut self) -> Result<usize> {
-        let segment = FileTableSegment {
-            next_segment_addr: None,
-            dirs: vec![
-                None;
-                usize::try_from(self.conf.default_dirs_capacity_by_ft_segment.get()).unwrap()
-            ],
-            files: vec![
-                None;
-                usize::try_from(self.conf.default_files_capacity_by_ft_segment.get())
-                    .unwrap()
-            ],
-        };
-
-        // Write new segment
-        let (new_segment_addr, _) = self.write_data_where_possible(
-            // TODO: improve this mess
-            Source::new(Cursor::new(segment.encode())),
-        )?;
-
-        // Update previous segment's 'next address'
-        self.source
-            .set_position(self.segment_addr(self.file_segments.len() - 1))?;
-
-        self.source.write_all(&new_segment_addr.to_le_bytes())?;
-
-        // Update in-memory representation
-        self.file_segments.last_mut().unwrap().next_segment_addr = Some(new_segment_addr);
-        self.file_segments.push(segment);
-
-        Ok(self.file_segments.len() - 1)
-    }
-
-    fn get_addr_for_item_insert(&mut self, item_type: ItemType) -> Result<SegmentEntry> {
-        let free_entry_addr =
-            match item_type {
-                ItemType::Directory => {
-                    // TODO: reverse search as it's more likely free entries are the end
-                    self.file_segments
-                        .iter()
-                        .enumerate()
-                        .find_map(|(segment_index, segment)| {
-                            segment.dirs.iter().position(|entry| entry.is_none()).map(
-                                |entry_index| SegmentEntry {
-                                    segment_index,
-                                    entry_index,
-                                    entry_addr: self.segment_addr(segment_index)
-                                        + segment
-                                            .dir_entry_offset(u32::try_from(entry_index).unwrap()),
-                                },
-                            )
-                        })
-                }
-
-                ItemType::File => {
-                    // TODO: same thing here
-                    self.file_segments
-                        .iter()
-                        .enumerate()
-                        .find_map(|(segment_index, segment)| {
-                            segment.files.iter().position(|entry| entry.is_none()).map(
-                                |entry_index| SegmentEntry {
-                                    segment_index,
-                                    entry_index,
-                                    entry_addr: self.segment_addr(segment_index)
-                                        + segment
-                                            .file_entry_offset(u32::try_from(entry_index).unwrap()),
-                                },
-                            )
-                        })
-                }
-            };
-
-        match free_entry_addr {
-            Some(addr) => Ok(addr),
-
-            None => {
-                let segment_index = self.create_segment()?;
-                let segment = self.file_segments.get(segment_index).unwrap();
-
-                Ok(SegmentEntry {
-                    segment_index,
-                    entry_index: 0,
-                    entry_addr: self.segment_addr(segment_index)
-                        + match item_type {
-                            ItemType::Directory => segment.dir_entry_offset(0),
-                            ItemType::File => segment.file_entry_offset(0),
-                        },
-                })
-            }
-        }
-    }
-
-    fn ensure_no_duplicate_name(&self, name: &str, parent_dir: DirectoryIdOrRoot) -> Result<()> {
-        let parent_dir_content = self
-            .dirs_content
-            .get(&parent_dir)
-            .context("Provided parent directory ID does not exist")?;
-
-        if !parent_dir_content.names.contains(name) {
-            Ok(())
-        } else {
-            bail!(
-                "An item named '{name}' already exists in {}",
-                match parent_dir {
-                    DirectoryIdOrRoot::Root => "root directory".to_owned(),
-                    DirectoryIdOrRoot::NonRoot(id) =>
-                        format!("parent directory '{}'", self.get_dir(id).unwrap().name),
-                }
-            );
-        }
     }
 
     /// Create a new directory
@@ -907,6 +701,215 @@ impl<S: Read + Write + Seek> Archive<S> {
     pub fn close(mut self) -> Result<S> {
         self.source.flush()?;
         Ok(self.source.into_inner())
+    }
+}
+
+/// Internal functions
+impl<S: Read + Write + Seek> Archive<S> {
+    fn segment_addr(&self, segment_index: usize) -> u64 {
+        assert!(segment_index < self.file_segments.len());
+
+        if segment_index == 0 {
+            HEADER_SIZE as u64
+        } else {
+            self.file_segments[segment_index - 1]
+                .next_segment_addr
+                .unwrap()
+        }
+    }
+
+    fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
+        self.file_segments
+            .iter()
+            .enumerate()
+            .find_map(|(segment_index, segment)| {
+                let entry_index = match item_id {
+                    ItemId::Directory(id) => {
+                        segment.dirs.iter().flatten().position(|dir| dir.id == id)
+                    }
+
+                    ItemId::File(id) => segment
+                        .files
+                        .iter()
+                        .flatten()
+                        .position(|file| file.id == id),
+                };
+
+                entry_index.map(|entry_index| {
+                    let entry_index_u32 = u32::try_from(entry_index).unwrap();
+
+                    SegmentEntry {
+                        segment_index,
+                        entry_index,
+                        entry_addr: self.segment_addr(segment_index)
+                            + match item_id {
+                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32),
+                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32),
+                            },
+                    }
+                })
+            })
+            .context(match item_id {
+                ItemId::Directory(_) => "Directory not found",
+                ItemId::File(_) => "File not found",
+            })
+    }
+
+    /// Write some data (file table segment, file content, etc.) wherever there is some free space
+    fn write_data_where_possible(
+        &mut self,
+        mut data: Source<impl Read + Seek>,
+    ) -> Result<(u64, Sha3_256)> {
+        let len = data.seek_len()?;
+
+        let (addr, growing) = match self.coverage.find_free_zone_for(len) {
+            Some(segment) => (segment.start, false),
+            None => (self.coverage.next_writable_addr(), true),
+        };
+
+        data.set_position(0)?;
+        self.source.set_position(addr)?;
+
+        let mut checksum = Sha3_256::new();
+        let mut written = 0;
+
+        // Progressively write the data using 4KB chunks and compute the checksum in the meantime
+        const CHUNK_SIZE: usize = 4096;
+
+        while written < len {
+            let mut buf = [0; CHUNK_SIZE];
+            let len = (CHUNK_SIZE as u64).min(len - written);
+            let len_usize = usize::try_from(len).unwrap();
+            data.read_exact(&mut buf[0..len_usize])?;
+
+            let data = &buf[0..len_usize];
+
+            self.source.write_all(data)?;
+            written += len;
+            checksum.update(data);
+        }
+
+        if growing {
+            self.coverage.grow_to(self.source.seek_len()?);
+        }
+
+        self.coverage.mark_as_used(addr, len);
+
+        Ok((addr, checksum))
+    }
+
+    // returns address of first entry
+    fn create_segment(&mut self) -> Result<usize> {
+        let segment = FileTableSegment {
+            next_segment_addr: None,
+            dirs: vec![
+                None;
+                usize::try_from(self.conf.default_dirs_capacity_by_ft_segment.get()).unwrap()
+            ],
+            files: vec![
+                None;
+                usize::try_from(self.conf.default_files_capacity_by_ft_segment.get())
+                    .unwrap()
+            ],
+        };
+
+        // Write new segment
+        let (new_segment_addr, _) = self.write_data_where_possible(
+            // TODO: improve this mess
+            Source::new(Cursor::new(segment.encode())),
+        )?;
+
+        // Update previous segment's 'next address'
+        self.source
+            .set_position(self.segment_addr(self.file_segments.len() - 1))?;
+
+        self.source.write_all(&new_segment_addr.to_le_bytes())?;
+
+        // Update in-memory representation
+        self.file_segments.last_mut().unwrap().next_segment_addr = Some(new_segment_addr);
+        self.file_segments.push(segment);
+
+        Ok(self.file_segments.len() - 1)
+    }
+
+    fn get_addr_for_item_insert(&mut self, item_type: ItemType) -> Result<SegmentEntry> {
+        let free_entry_addr =
+            match item_type {
+                ItemType::Directory => {
+                    // TODO: reverse search as it's more likely free entries are the end
+                    self.file_segments
+                        .iter()
+                        .enumerate()
+                        .find_map(|(segment_index, segment)| {
+                            segment.dirs.iter().position(|entry| entry.is_none()).map(
+                                |entry_index| SegmentEntry {
+                                    segment_index,
+                                    entry_index,
+                                    entry_addr: self.segment_addr(segment_index)
+                                        + segment
+                                            .dir_entry_offset(u32::try_from(entry_index).unwrap()),
+                                },
+                            )
+                        })
+                }
+
+                ItemType::File => {
+                    // TODO: same thing here
+                    self.file_segments
+                        .iter()
+                        .enumerate()
+                        .find_map(|(segment_index, segment)| {
+                            segment.files.iter().position(|entry| entry.is_none()).map(
+                                |entry_index| SegmentEntry {
+                                    segment_index,
+                                    entry_index,
+                                    entry_addr: self.segment_addr(segment_index)
+                                        + segment
+                                            .file_entry_offset(u32::try_from(entry_index).unwrap()),
+                                },
+                            )
+                        })
+                }
+            };
+
+        match free_entry_addr {
+            Some(addr) => Ok(addr),
+
+            None => {
+                let segment_index = self.create_segment()?;
+                let segment = self.file_segments.get(segment_index).unwrap();
+
+                Ok(SegmentEntry {
+                    segment_index,
+                    entry_index: 0,
+                    entry_addr: self.segment_addr(segment_index)
+                        + match item_type {
+                            ItemType::Directory => segment.dir_entry_offset(0),
+                            ItemType::File => segment.file_entry_offset(0),
+                        },
+                })
+            }
+        }
+    }
+
+    fn ensure_no_duplicate_name(&self, name: &str, parent_dir: DirectoryIdOrRoot) -> Result<()> {
+        let parent_dir_content = self
+            .dirs_content
+            .get(&parent_dir)
+            .context("Provided parent directory ID does not exist")?;
+
+        if !parent_dir_content.names.contains(name) {
+            Ok(())
+        } else {
+            bail!(
+                "An item named '{name}' already exists in {}",
+                match parent_dir {
+                    DirectoryIdOrRoot::Root => "root directory".to_owned(),
+                    DirectoryIdOrRoot::NonRoot(id) =>
+                        format!("parent directory '{}'", self.get_dir(id).unwrap().name),
+                }
+            );
+        }
     }
 }
 
