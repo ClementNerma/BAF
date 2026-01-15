@@ -15,7 +15,7 @@ pub struct Timestamp(u64);
 
 impl Timestamp {
     /// Get the current timestamp
-    pub fn now() -> Self {
+    pub(crate) fn now() -> Self {
         Self::from(SystemTime::now())
     }
 

@@ -1,7 +1,4 @@
-use std::{
-    io::{Read, Seek, Write},
-    time::SystemTime,
-};
+use std::io::{Read, Seek, Write};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -142,15 +139,15 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
 
             let dir = match item {
                 Some(DirEntry::Directory(dir)) => dir.clone(),
+
                 Some(DirEntry::File(_)) => {
                     bail!("Cannot crate path '{path}' in archive: '{curr_path}' is a file",)
                 }
+
                 None => {
-                    let dir_id = self.archive.create_dir(
-                        curr_id,
-                        segment.clone(),
-                        Timestamp::from(SystemTime::now()),
-                    )?;
+                    let dir_id =
+                        self.archive
+                            .create_dir(curr_id, segment.clone(), Timestamp::now())?;
 
                     self.archive.get_dir(dir_id).unwrap().clone()
                 }
@@ -163,20 +160,15 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
         curr_dir.context("Cannot get or create root directory in archive")
     }
 
-    /// Create a file at the provided path and the provided content
-    ///
-    /// Will fail if a file already exists at this location
-    pub fn create_file_at(
-        &mut self,
-        path: &str,
-        content: impl Read + Seek,
-        modif_time: Timestamp,
-    ) -> Result<()> {
-        if self.get_file_at(path).is_some() {
-            bail!("File already exists in archive at path '{path}'");
-        }
+    /// Remove the directory at the provided path, recursively
+    pub fn remove_dir_at(&mut self, path: &str) -> Result<()> {
+        let dir = self
+            .get_dir_at(path)
+            .context("Provided directory was not found")?;
 
-        self.write_file_at(path, content, modif_time)
+        self.archive.remove_dir(dir.id)?;
+
+        Ok(())
     }
 
     /// Either create a file or replace an existing one at the provided path
@@ -210,6 +202,22 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
         Ok(())
     }
 
+    /// Create a file at the provided path and the provided content
+    ///
+    /// Will fail if a file already exists at this location
+    pub fn create_file_at(
+        &mut self,
+        path: &str,
+        content: impl Read + Seek,
+        modif_time: Timestamp,
+    ) -> Result<()> {
+        if self.get_file_at(path).is_some() {
+            bail!("File already exists in archive at path '{path}'");
+        }
+
+        self.write_file_at(path, content, modif_time)
+    }
+
     /// Update an existing file at the provided path
     pub fn update_file_at(
         &mut self,
@@ -222,16 +230,6 @@ impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
         }
 
         self.write_file_at(path, content, modif_time)
-    }
-    /// Remove the directory at the provided path, recursively
-    pub fn remove_dir_at(&mut self, path: &str) -> Result<()> {
-        let dir = self
-            .get_dir_at(path)
-            .context("Provided directory was not found")?;
-
-        self.archive.remove_dir(dir.id)?;
-
-        Ok(())
     }
 
     /// Remove the file at the provided path
