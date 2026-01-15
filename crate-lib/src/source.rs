@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 ///
 /// It basically wraps an existing `Read` / `Write` stream through a buffered reader,
 /// exposing utility functions that allow easier reading and writing.
-pub struct Source<S: Read> {
+pub(crate) struct Source<S: Read> {
     reader: BufReader<S>,
 }
 

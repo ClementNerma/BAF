@@ -10,6 +10,7 @@ use crate::{
     },
 };
 
+/// See [`Archive::iter`]
 pub struct ArchiveIter<'a, R: Read + Seek> {
     archive: &'a Archive<R>,
     dir_id: DirectoryIdOrRoot,

@@ -35,7 +35,6 @@ pub use self::{
     file_reader::FileReader,
     health::FtCorrectnessError,
     iter::ArchiveIter,
-    source::Source,
     with_paths::{ItemIdOrRoot, WithPaths},
 };
 

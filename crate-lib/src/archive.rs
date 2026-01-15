@@ -19,7 +19,7 @@ use crate::{
         },
         file::{FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY, File, FileId},
         ft_segment::{FileTableSegment, FileTableSegmentDecodingError},
-        header::{HEADER_SIZE, Header},
+        header::{ArchiveVersion, HEADER_SIZE, Header},
         name::ItemName,
         timestamp::Timestamp,
     },
@@ -30,14 +30,11 @@ use crate::{
     with_paths::WithPaths,
 };
 
-// TODO: check if parent dirs do exist during decoding -> requires to have decoded all directories first
 // TODO: ensure no files or segment overlap (= no overlap in coverage when calling .mark_as_used)
-// TODO: ensure no duplicate ID either in dirs or files
 
 /// Representation of an archive
 ///
-/// This type is designed for pretty low-level stuff, for easier manipulation see the [`Archive::easy`] method
-/// or open the archive from the [`EasyArchive`] struct.
+/// Archives work with file and directory IDs. To use human-readable paths instead, check [`Archive::with_paths`]
 pub struct Archive<S: Read + Seek> {
     conf: ArchiveConfig,
     source: Source<S>,
@@ -118,14 +115,9 @@ impl<S: Read + Seek> Archive<S> {
         })
     }
 
-    /// Get access to the underlying source
-    pub fn source(&mut self) -> &mut Source<S> {
-        &mut self.source
-    }
-
-    /// Get the content of the archive's header
-    pub fn header(&self) -> &Header {
-        &self.header
+    /// Get the archive's version
+    pub fn version(&self) -> &ArchiveVersion {
+        &self.header.version
     }
 
     /// Get the list of all directories contained inside the archive
@@ -602,8 +594,6 @@ impl<S: Read + Write + Seek> Archive<S> {
     /// Create a new file
     ///
     /// Modification time is in seconds since Unix' Epoch
-    ///
-    /// Content is provided through a [`crate::source::ReadableSource`]
     pub fn create_file(
         &mut self,
         parent_dir: DirectoryIdOrRoot,

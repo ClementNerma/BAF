@@ -39,7 +39,7 @@ impl ItemName {
         Ok(())
     }
 
-    pub fn consume_from_reader(
+    pub(crate) fn consume_from_reader(
         source: &mut Source<impl Read>,
     ) -> Result<Result<Self, NameDecodingError>> {
         source.read_into_array::<256>().map(Self::decode)
