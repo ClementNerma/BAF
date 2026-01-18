@@ -965,6 +965,22 @@ impl<'a> DirEntry<'a> {
             DirEntry::File(file) => &file.name,
         }
     }
+
+    /// Is it a directory?
+    pub fn is_dir(&self) -> bool {
+        match self {
+            DirEntry::Directory(_) => true,
+            DirEntry::File(_) => false,
+        }
+    }
+
+    /// Is it a file?
+    pub fn is_file(&self) -> bool {
+        match self {
+            DirEntry::Directory(_) => false,
+            DirEntry::File(_) => true,
+        }
+    }
 }
 
 fn compute_coverage<'a>(
