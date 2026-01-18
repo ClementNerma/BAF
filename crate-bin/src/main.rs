@@ -50,19 +50,22 @@ fn inner_main() -> Result<()> {
         }
 
         Action::List => {
-            let archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
+            let  archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
             for item in archive.ordered_iter() {
                 match item {
                     DirEntry::Directory(directory) => {
-                        println!("|  {}/", archive.compute_dir_path(directory.id).unwrap());
+                        println!(
+                            "|  {}/",
+                            archive.with_paths().compute_dir_path(directory.id).unwrap()
+                        );
                     }
 
                     DirEntry::File(file) => {
                         println!(
                             "|> {} ({})",
-                            archive.compute_file_path(file.id).unwrap(),
+                            archive.with_paths().compute_file_path(file.id).unwrap(),
                             human_size(file.content_len, Some(2)),
                         );
                     }
@@ -124,7 +127,7 @@ fn inner_main() -> Result<()> {
             } in dirs
             {
                 archive
-                    .with_paths()
+                    .with_paths_mut()
                     .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
             }
 
@@ -168,7 +171,7 @@ fn inner_main() -> Result<()> {
                     .with_context(|| format!("Failed to open file: {}", real_path.display()))?;
 
                 archive
-                    .with_paths()
+                    .with_paths_mut()
                     .write_file_at(path_in_archive, file, get_item_mtime(real_path)?)
                     .context("Failed to add file to archive")?;
             }

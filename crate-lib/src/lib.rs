@@ -18,6 +18,7 @@ mod health;
 mod iter;
 mod source;
 mod with_paths;
+mod with_paths_mut;
 
 #[cfg(test)]
 mod tests;
@@ -37,6 +38,7 @@ pub use self::{
     health::FileTableCorrectnessError,
     iter::ArchiveIter,
     with_paths::{ItemIdOrRoot, WithPaths},
+    with_paths_mut::WithPathsMut,
 };
 
 /// This macro is used to ensure, at compile-time, that only one single

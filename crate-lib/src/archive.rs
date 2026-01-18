@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use sha3::{Digest, Sha3_256};
 
 use crate::{
+    WithPathsMut,
     config::ArchiveConfig,
     coverage::{Coverage, Segment},
     data::{
@@ -142,9 +143,18 @@ impl<S: Read + Seek> Archive<S> {
         self.files.get(&id)
     }
 
-    /// Use path-based APIs
-    pub fn with_paths(&mut self) -> WithPaths<'_, S> {
+    /// Read the archive using path-based APIs
+    ///
+    /// To get access to methods that require mutating `self`, use [`Self::with_paths_mut`] instead
+    pub fn with_paths(&self) -> WithPaths<'_, S> {
         WithPaths::new(self)
+    }
+
+    /// Manipulate the archive using path-based APIs
+    ///
+    /// Unlike [`Self::with_paths`], allows mutating the archive reference
+    pub fn with_paths_mut(&mut self) -> WithPathsMut<'_, S> {
+        WithPathsMut::new(self)
     }
 
     /// Get the list of all children directories and files inside the provided directory
@@ -214,65 +224,6 @@ impl<S: Read + Seek> Archive<S> {
     pub fn read_file_to_string(&mut self, id: FileId) -> Result<String> {
         let bytes = self.read_file_to_vec(id)?;
         String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
-    }
-
-    /// (Internal) Compute the full path of an item inside the archive
-    ///
-    /// Used by [`Self::compute_dir_path`] and [`Self::compute_file_path`]
-    fn compute_item_path(
-        &self,
-        item_name: &ItemName,
-        first_parent_dir: DirectoryIdOrRoot,
-    ) -> String {
-        let mut components = vec![];
-
-        let mut next = first_parent_dir;
-
-        loop {
-            match next {
-                DirectoryIdOrRoot::Root => break,
-                DirectoryIdOrRoot::NonRoot(directory_id) => {
-                    let curr = self.get_dir(directory_id).unwrap();
-                    components.push(curr.name.as_ref());
-                    next = curr.parent_dir;
-                }
-            }
-        }
-
-        let predic_size =
-            components.iter().map(|c| c.len()).sum::<usize>() + components.len() + item_name.len();
-
-        let mut name = String::with_capacity(predic_size);
-
-        for component in components.iter().rev() {
-            name.push_str(component);
-            name.push('/');
-        }
-
-        name.push_str(item_name);
-
-        // Ensure the optimization was correctly performed
-        assert_eq!(name.len(), predic_size);
-
-        name
-    }
-
-    /// Compute the full path of a directory inside the archive
-    pub fn compute_dir_path(&self, dir_id: DirectoryId) -> Result<String> {
-        let dir = self
-            .get_dir(dir_id)
-            .context("Directory was not found in archive")?;
-
-        Ok(self.compute_item_path(&dir.name, dir.parent_dir))
-    }
-
-    /// Compute the full path of a file inside the archive
-    pub fn compute_file_path(&self, file_id: FileId) -> Result<String> {
-        let file = self
-            .get_file(file_id)
-            .context("File was not found in archive")?;
-
-        Ok(self.compute_item_path(&file.name, file.parent_dir))
     }
 
     /// Iterate over the list of files and directories

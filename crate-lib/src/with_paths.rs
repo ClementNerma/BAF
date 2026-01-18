@@ -1,27 +1,90 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::{
-    FileId,
+    FileId, ItemName,
     archive::{Archive, DirEntry},
     data::{
         directory::{Directory, DirectoryId, DirectoryIdOrRoot},
         file::File,
         path::PathInArchive,
-        timestamp::Timestamp,
     },
-    file_reader::FileReader,
 };
 
-/// Allows manipulating an archive using human-readable paths instead of IDs
+/// Allows reading an archive using human-readable paths instead of IDs
+///
+/// Obtained from [`Archive::with_paths`]
+///
+/// To access methods that require mutating the archive, see [`Archive::with_paths_mut`]
 pub struct WithPaths<'a, S: Read + Seek> {
-    archive: &'a mut Archive<S>,
+    archive: &'a Archive<S>,
 }
 
 impl<'a, S: Read + Seek> WithPaths<'a, S> {
-    pub(crate) fn new(archive: &'a mut Archive<S>) -> Self {
+    pub(crate) fn new(archive: &'a Archive<S>) -> Self {
         Self { archive }
+    }
+
+    /// (Internal) Compute the full path of an item inside the archive
+    ///
+    /// Used by [`Self::compute_dir_path`] and [`Self::compute_file_path`]
+    fn compute_item_path(
+        &self,
+        item_name: &ItemName,
+        first_parent_dir: DirectoryIdOrRoot,
+    ) -> String {
+        let mut components = vec![];
+
+        let mut next = first_parent_dir;
+
+        loop {
+            match next {
+                DirectoryIdOrRoot::Root => break,
+                DirectoryIdOrRoot::NonRoot(directory_id) => {
+                    let curr = self.archive.get_dir(directory_id).unwrap();
+                    components.push(curr.name.as_ref());
+                    next = curr.parent_dir;
+                }
+            }
+        }
+
+        let predic_size =
+            components.iter().map(|c| c.len()).sum::<usize>() + components.len() + item_name.len();
+
+        let mut name = String::with_capacity(predic_size);
+
+        for component in components.iter().rev() {
+            name.push_str(component);
+            name.push('/');
+        }
+
+        name.push_str(item_name);
+
+        // Ensure the optimization was correctly performed
+        assert_eq!(name.len(), predic_size);
+
+        name
+    }
+
+    /// Compute the full path of a directory inside the archive
+    pub fn compute_dir_path(&self, dir_id: DirectoryId) -> Result<String> {
+        let dir = self
+            .archive
+            .get_dir(dir_id)
+            .context("Directory was not found in archive")?;
+
+        Ok(self.compute_item_path(&dir.name, dir.parent_dir))
+    }
+
+    /// Compute the full path of a file inside the archive
+    pub fn compute_file_path(&self, file_id: FileId) -> Result<String> {
+        let file = self
+            .archive
+            .get_file(file_id)
+            .context("File was not found in archive")?;
+
+        Ok(self.compute_item_path(&file.name, file.parent_dir))
     }
 
     /// Get the item located the provided path
@@ -88,159 +151,6 @@ impl<'a, S: Read + Seek> WithPaths<'a, S> {
                 .unwrap()),
             ItemIdOrRoot::File(_) => bail!("A file exists at the provided path"),
         }
-    }
-
-    /// Get a [`FileReader`] over the file at the provided path inside the archive
-    pub fn read_file_at(&mut self, path: &str) -> Result<FileReader<'_, S>> {
-        let id = self.get_file_at(path).context("File was not found")?.id;
-        self.archive.read_file(id)
-    }
-}
-
-impl<'a, S: Read + Write + Seek> WithPaths<'a, S> {
-    /// Create a directory at the provided path
-    pub fn create_dir_at(&mut self, path: &str, modif_time: Timestamp) -> Result<DirectoryId> {
-        let mut path = PathInArchive::new(path)
-            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
-
-        let filename = path.pop().context("Path cannot be empty")?;
-
-        let parent_dir = if path.is_empty() {
-            DirectoryIdOrRoot::Root
-        } else {
-            DirectoryIdOrRoot::NonRoot(self.get_or_create_dir_at(&path.to_string())?.id)
-        };
-
-        self.archive
-            .create_dir(parent_dir, filename, modif_time)
-            .context("Failed to create directory in archive")
-    }
-
-    /// Get or create a directory at the provided path
-    ///
-    /// Either returns the existing directory's informations or the newly-created one's
-    pub fn get_or_create_dir_at(&mut self, path: &str) -> Result<Directory> {
-        let mut curr_dir = None::<Directory>;
-        let mut curr_path = PathInArchive::empty();
-
-        let validated_path = PathInArchive::new(path)
-            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
-
-        for segment in validated_path.components() {
-            let curr_id = curr_dir
-                .map(|item| DirectoryIdOrRoot::NonRoot(item.id))
-                .unwrap_or(DirectoryIdOrRoot::Root);
-
-            let item = self
-                .archive
-                .read_dir(curr_id)
-                .unwrap()
-                .find(|item| item.name() == segment);
-
-            let dir = match item {
-                Some(DirEntry::Directory(dir)) => dir.clone(),
-
-                Some(DirEntry::File(_)) => {
-                    bail!("Cannot crate path '{path}' in archive: '{curr_path}' is a file",)
-                }
-
-                None => {
-                    let dir_id =
-                        self.archive
-                            .create_dir(curr_id, segment.clone(), Timestamp::now())?;
-
-                    self.archive.get_dir(dir_id).unwrap().clone()
-                }
-            };
-
-            curr_path.append(dir.name.clone());
-            curr_dir = Some(dir);
-        }
-
-        curr_dir.context("Cannot get or create root directory in archive")
-    }
-
-    /// Remove the directory at the provided path, recursively
-    pub fn remove_dir_at(&mut self, path: &str) -> Result<()> {
-        let dir = self
-            .get_dir_at(path)
-            .context("Provided directory was not found")?;
-
-        self.archive.remove_dir(dir.id)?;
-
-        Ok(())
-    }
-
-    /// Either create a file or replace an existing one at the provided path
-    pub fn write_file_at(
-        &mut self,
-        path: &str,
-        content: impl Read + Seek,
-        modif_time: Timestamp,
-    ) -> Result<()> {
-        if let Some(path) = self.get_file_at(path) {
-            return self
-                .archive
-                .replace_file_content(path.id, modif_time, content);
-        }
-
-        let mut path = PathInArchive::new(path)
-            .map_err(|err| anyhow!("Provided path '{path}' is invalid: {err}"))?;
-
-        let filename = path.pop().context("Path cannot be empty")?;
-
-        let parent_dir = if path.is_empty() {
-            DirectoryIdOrRoot::Root
-        } else {
-            DirectoryIdOrRoot::NonRoot(self.get_or_create_dir_at(&path.to_string())?.id)
-        };
-
-        self.archive
-            .create_file(parent_dir, filename, modif_time, content)
-            .context("Failed to create file in archive")?;
-
-        Ok(())
-    }
-
-    /// Create a file at the provided path and the provided content
-    ///
-    /// Will fail if a file already exists at this location
-    pub fn create_file_at(
-        &mut self,
-        path: &str,
-        content: impl Read + Seek,
-        modif_time: Timestamp,
-    ) -> Result<()> {
-        if self.get_file_at(path).is_some() {
-            bail!("File already exists in archive at path '{path}'");
-        }
-
-        self.write_file_at(path, content, modif_time)
-    }
-
-    /// Update an existing file at the provided path
-    pub fn update_file_at(
-        &mut self,
-        path: &str,
-        content: impl Read + Seek,
-        modif_time: Timestamp,
-    ) -> Result<()> {
-        if self.get_file_at(path).is_none() {
-            bail!("File not found in archive at path '{path}'");
-        }
-
-        self.write_file_at(path, content, modif_time)
-    }
-
-    /// Remove the file at the provided path
-    pub fn remove_file_at(&mut self, path: &str) -> Result<()> {
-        let file = self
-            .get_file_at(path)
-            .context("Provided file was not found")?;
-
-        self.archive.remove_file(file.id)?;
-
-        Ok(())
     }
 }
 
