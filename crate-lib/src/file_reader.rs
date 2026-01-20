@@ -1,5 +1,6 @@
 use std::io::{Error, Read};
 
+use anyhow::{Context, Result};
 use sha3::{Digest, Sha3_256};
 
 use crate::source::Source;
@@ -31,6 +32,21 @@ impl<'a, S: Read> FileReader<'a, S> {
     /// Get the file's length, in bytes
     pub fn file_len(&self) -> u64 {
         self.len
+    }
+
+    /// Read the file'scontent to a `Vec<u8>`
+    pub fn read_to_vec(mut self) -> Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(usize::try_from(self.file_len()).unwrap());
+        self.read_to_end(&mut buf)?;
+
+        Ok(buf)
+    }
+
+    /// Read this file's content as a string
+    pub fn read_to_string(self) -> Result<String> {
+        let bytes = self.read_to_vec()?;
+
+        String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
     }
 }
 

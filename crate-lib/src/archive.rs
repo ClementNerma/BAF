@@ -212,18 +212,12 @@ impl<S: Read + Seek> Archive<S> {
 
     /// Get the content of a file contained inside the archive into a vector of bytes
     pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
-        let mut file = self.read_file(id)?;
-
-        let mut buf = Vec::with_capacity(usize::try_from(file.file_len()).unwrap());
-        file.read_to_end(&mut buf)?;
-
-        Ok(buf)
+        self.read_file(id).and_then(FileReader::read_to_vec)
     }
 
     /// Get the content of a file contained inside the archive as a string
     pub fn read_file_to_string(&mut self, id: FileId) -> Result<String> {
-        let bytes = self.read_file_to_vec(id)?;
-        String::from_utf8(bytes).context("File's content is not a valid UTF-8 string")
+        self.read_file(id).and_then(FileReader::read_to_string)
     }
 
     /// Iterate over the list of files and directories
