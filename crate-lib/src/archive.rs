@@ -887,7 +887,11 @@ impl Archive<StdFile> {
         path: impl AsRef<Path>,
         conf: ArchiveConfig,
     ) -> Result<Self, ArchiveMetadataDecodingError> {
-        let file = StdFile::open(path.as_ref())
+        let file = OpenOptions::new()
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.as_ref())
             .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
             .map_err(ArchiveMetadataDecodingError::IoError)?;
 
