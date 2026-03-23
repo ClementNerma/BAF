@@ -34,5 +34,11 @@ pub enum Action {
             help = "Directory to add the items into in the archive"
         )]
         under_dir: Option<String>,
+
+        #[clap(
+            long = "merge-dirs",
+            help = "Merge with existing directories if they already exist in the archive"
+        )]
+        merge_dirs: bool,
     },
 }

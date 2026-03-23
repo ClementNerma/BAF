@@ -96,6 +96,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
         Action::Add {
             items_path,
             under_dir,
+            merge_dirs,
         } => {
             for item_path in &items_path {
                 if !item_path.exists() {
@@ -138,11 +139,17 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                 path_in_archive,
             } in dirs
             {
-                if archive.with_paths().get_dir_at(&path_in_archive).is_none() {
-                    archive
-                        .with_paths_mut()
-                        .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
+                if merge_dirs && archive.with_paths().get_dir_at(&path_in_archive).is_some() {
+                    debug!(
+                        "> Directory '{}' already exists in archive, going to merge",
+                        path_in_archive
+                    );
+                    continue;
                 }
+
+                archive
+                    .with_paths_mut()
+                    .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
             }
 
             let files_size = files
