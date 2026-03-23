@@ -126,9 +126,11 @@ fn inner_main() -> Result<()> {
                 path_in_archive,
             } in dirs
             {
-                archive
-                    .with_paths_mut()
-                    .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
+                if archive.with_paths().get_dir_at(&path_in_archive).is_none() {
+                    archive
+                        .with_paths_mut()
+                        .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
+                }
             }
 
             let files_size = files
