@@ -14,28 +14,39 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{Archive, ArchiveConfig, DirEntry, Timestamp};
 use clap::Parser;
+use log::{debug, error, info, warn};
 use walkdir::WalkDir;
 
 use self::{
     args::{Action, CmdArgs},
+    logger::Logger,
     tree::ArchiveContentTree,
 };
 
 mod args;
+mod logger;
 mod tree;
 
 fn main() -> ExitCode {
-    match inner_main() {
+    let args = CmdArgs::parse();
+
+    Logger::new(args.verbosity).init().unwrap();
+
+    match inner_main(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("{err:?}");
+            error!("{err:?}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn inner_main() -> Result<()> {
-    let CmdArgs { path, action } = CmdArgs::parse();
+fn inner_main(args: CmdArgs) -> Result<()> {
+    let CmdArgs {
+        path,
+        action,
+        verbosity: _,
+    } = args;
 
     match action {
         Action::Create => {
@@ -56,14 +67,14 @@ fn inner_main() -> Result<()> {
             for item in archive.ordered_iter() {
                 match item {
                     DirEntry::Directory(directory) => {
-                        println!(
+                        info!(
                             "|  {}/",
                             archive.with_paths().compute_dir_path(directory.id).unwrap()
                         );
                     }
 
                     DirEntry::File(file) => {
-                        println!(
+                        info!(
                             "|> {} ({})",
                             archive.with_paths().compute_file_path(file.id).unwrap(),
                             human_size(file.content_len, Some(2)),
@@ -77,13 +88,12 @@ fn inner_main() -> Result<()> {
             let archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            println!("{}", ArchiveContentTree::build(&archive));
+            info!("{}", ArchiveContentTree::build(&archive));
         }
 
         Action::Add {
             items_path,
             under_dir,
-            detailed,
         } => {
             for item_path in &items_path {
                 if !item_path.exists() {
@@ -119,7 +129,7 @@ fn inner_main() -> Result<()> {
                 })?
             };
 
-            println!("Creating {} directories in archive...", dirs.len());
+            info!("Creating {} directories in archive...", dirs.len());
 
             for ItemToAdd {
                 real_path,
@@ -150,7 +160,7 @@ fn inner_main() -> Result<()> {
 
             assert_eq!(files.len(), files_size.len());
 
-            println!(
+            info!(
                 "Adding {} files (total: {})",
                 files.len(),
                 human_size(files_size.values().sum::<u64>(), Some(2))
@@ -161,13 +171,11 @@ fn inner_main() -> Result<()> {
                 path_in_archive,
             } in &files
             {
-                if detailed {
-                    println!(
-                        "> Adding file: {} ({})",
-                        real_path.display(),
-                        human_size(*files_size.get(&real_path).unwrap(), Some(2))
-                    );
-                }
+                debug!(
+                    "> Adding file: {} ({})",
+                    real_path.display(),
+                    human_size(*files_size.get(&real_path).unwrap(), Some(2))
+                );
 
                 let file = File::open(real_path)
                     .with_context(|| format!("Failed to open file: {}", real_path.display()))?;
@@ -180,7 +188,7 @@ fn inner_main() -> Result<()> {
 
             archive.flush().context("Failed to close archive")?;
 
-            println!("Done!");
+            info!("Done!");
         }
     }
 
@@ -282,7 +290,7 @@ fn find_items_to_add<P: AsRef<Path>>(items: &[P], under_dir: Option<&str>) -> Re
                     path_in_archive,
                 });
             } else {
-                eprintln!(
+                warn!(
                     "WARN: Ignoring unknown item type at path '{}'",
                     item.path().display()
                 );
@@ -299,7 +307,7 @@ fn get_item_mtime(path: &Path) -> Result<Timestamp> {
             .context("Failed to get metadata for item")?
             .modified()
             .unwrap_or_else(|err| {
-                eprintln!("WARN: Failed to get the item's modification time ({err}) ; falling back to system's current time");
+                warn!("WARN: Failed to get the item's modification time ({err}) ; falling back to system's current time");
                 SystemTime::now()
             });
 

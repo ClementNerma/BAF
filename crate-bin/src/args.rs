@@ -1,11 +1,15 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use log::LevelFilter;
 
 #[derive(Parser)]
 pub struct CmdArgs {
     #[clap(help = "Path to the archive")]
     pub path: PathBuf,
+
+    #[clap(short, long, help = "Display verbose output", default_value = "info")]
+    pub verbosity: LevelFilter,
 
     #[clap(subcommand)]
     pub action: Action,
@@ -30,12 +34,5 @@ pub enum Action {
             help = "Directory to add the items into in the archive"
         )]
         under_dir: Option<String>,
-
-        #[clap(
-            short = 'd',
-            long,
-            help = "Display the path and size of each added file"
-        )]
-        detailed: bool,
     },
 }
