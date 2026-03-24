@@ -40,5 +40,11 @@ pub enum Action {
             help = "Merge with existing directories if they already exist in the archive"
         )]
         merge_dirs: bool,
+
+        #[clap(
+            long = "merge-files",
+            help = "Merge with existing files if they already exist in the archive"
+        )]
+        merge_files: bool,
     },
 }

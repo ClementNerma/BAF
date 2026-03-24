@@ -97,6 +97,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             items_path,
             under_dir,
             merge_dirs,
+            merge_files,
         } => {
             for item_path in &items_path {
                 if !item_path.exists() {
@@ -134,24 +135,59 @@ fn inner_main(args: CmdArgs) -> Result<()> {
 
             info!("Creating {} directories in archive...", dirs.len());
 
+            // Check files and directories beforehand
+            for ItemToAdd {
+                real_path: _,
+                path_in_archive,
+            } in &dirs
+            {
+                if archive.with_paths().get_item_at(path_in_archive).is_some() {
+                    if !merge_dirs {
+                        bail!(
+                            "Failed to add directory '{}' to archive: path already exists in the archive",
+                            path_in_archive
+                        );
+                    }
+
+                    debug!(
+                        "> Directory '{}' already exists in archive, going to merge",
+                        path_in_archive
+                    );
+                }
+            }
+
+            for ItemToAdd {
+                real_path: _,
+                path_in_archive,
+            } in &files
+            {
+                if archive.with_paths().get_item_at(path_in_archive).is_some() {
+                    if !merge_files {
+                        bail!(
+                            "Failed to add file '{}' to archive: path already exists in the archive",
+                            path_in_archive
+                        );
+                    }
+
+                    debug!(
+                        "> File '{}' already exists in archive, going to overwrite",
+                        path_in_archive
+                    );
+                }
+            }
+
+            // Create directories first, so that files can be added into them
             for ItemToAdd {
                 real_path,
                 path_in_archive,
             } in dirs
             {
-                if merge_dirs && archive.with_paths().get_dir_at(&path_in_archive).is_some() {
-                    debug!(
-                        "> Directory '{}' already exists in archive, going to merge",
-                        path_in_archive
-                    );
-                    continue;
-                }
-
                 archive
                     .with_paths_mut()
                     .create_dir_at(&path_in_archive, get_item_mtime(&real_path)?)?;
             }
 
+            // Get files size beforehand to display it
             let files_size = files
                 .iter()
                 .map(|file| {
