@@ -93,14 +93,16 @@ impl<'a, S: Read + Seek> WithPaths<'a, S> {
 
         for segment in PathInArchive::new(path).ok()?.components() {
             let mut dir_entries = match curr_dir_entry {
-                None => self.archive.read_dir(DirectoryIdOrRoot::Root).ok()?,
+                None => self.archive.read_dir_iter(DirectoryIdOrRoot::Root).ok()?,
 
                 Some(id) => match id {
-                    ItemIdOrRoot::Root => self.archive.read_dir(DirectoryIdOrRoot::Root).ok()?,
+                    ItemIdOrRoot::Root => {
+                        self.archive.read_dir_iter(DirectoryIdOrRoot::Root).ok()?
+                    }
 
                     ItemIdOrRoot::NonRootDirectory(dir_id) => self
                         .archive
-                        .read_dir(DirectoryIdOrRoot::NonRoot(dir_id))
+                        .read_dir_iter(DirectoryIdOrRoot::NonRoot(dir_id))
                         .ok()?,
 
                     ItemIdOrRoot::File(_) => return None,
@@ -144,10 +146,10 @@ impl<'a, S: Read + Seek> WithPaths<'a, S> {
             .get_item_at(path)
             .context("Provided path was not found inside the archive")?
         {
-            ItemIdOrRoot::Root => Ok(self.archive.read_dir(DirectoryIdOrRoot::Root).unwrap()),
+            ItemIdOrRoot::Root => Ok(self.archive.read_dir_iter(DirectoryIdOrRoot::Root).unwrap()),
             ItemIdOrRoot::NonRootDirectory(dir_id) => Ok(self
                 .archive
-                .read_dir(DirectoryIdOrRoot::NonRoot(dir_id))
+                .read_dir_iter(DirectoryIdOrRoot::NonRoot(dir_id))
                 .unwrap()),
             ItemIdOrRoot::File(_) => bail!("A file exists at the provided path"),
         }

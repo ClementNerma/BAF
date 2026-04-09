@@ -13,7 +13,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use baf::{Archive, ArchiveConfig, DirEntry, ItemId, Timestamp};
+use baf::{Archive, ArchiveConfig, DirEntry, DirectoryIdOrRoot, ItemId, ItemIdOrRoot, Timestamp};
 use clap::Parser;
 use log::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -67,7 +67,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             let  archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            for item in archive.ordered_iter() {
+            for item in archive.items_iter() {
                 match item {
                     DirEntry::Directory(directory) => {
                         info!(
@@ -238,15 +238,23 @@ fn inner_main(args: CmdArgs) -> Result<()> {
         }
 
         Action::Extract {
+            items_to_extract,
             output_dir,
             merge_dirs,
             overwrite_files,
         } => {
             let output_dir = match output_dir {
                 Some(dir) => {
-                    if !dir.is_dir() {
+                    if !dir.exists() {
+                        fs::create_dir(&dir).with_context(|| {
+                            format!(
+                                "Failed to create output directory at path '{}'",
+                                dir.display()
+                            )
+                        })?;
+                    } else if !merge_dirs {
                         bail!(
-                            "Provided output path '{}' is not a directory",
+                            "Failed to extract archive: output directory '{}' already exists",
                             dir.display()
                         );
                     }
@@ -261,10 +269,47 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             let mut archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            let archive_items = archive
-                .ordered_iter()
-                .map(|item| item.id())
-                .collect::<Vec<_>>();
+            let archive_items: Vec<_> = if items_to_extract.is_empty() {
+                archive.items_iter().map(|item| item.id()).collect()
+            } else {
+                let mut to_extract_ids = vec![];
+
+                for item_path in items_to_extract {
+                    let item = archive
+                        .with_paths()
+                        .get_item_at(&item_path)
+                        .with_context(|| {
+                            format!("Failed to find item at path '{}' in archive", item_path)
+                        })?;
+
+                    match item {
+                        ItemIdOrRoot::Root => {
+                            warn!(
+                                "WARN: Root directory was specified, which means all other items in the archive will be extracted as well"
+                            );
+                            to_extract_ids = archive.items_iter().map(|item| item.id()).collect();
+                            break;
+                        }
+
+                        ItemIdOrRoot::NonRootDirectory(dir) => {
+                            to_extract_ids.push(ItemId::Directory(dir));
+
+                            to_extract_ids.extend(
+                                archive
+                                    .read_dir_recursive(DirectoryIdOrRoot::NonRoot(dir))
+                                    .unwrap()
+                                    .map(|item| item.id()),
+                            );
+                        }
+
+                        ItemIdOrRoot::File(file) => {
+                            to_extract_ids.push(ItemId::File(file));
+                        }
+                    }
+                }
+
+                to_extract_ids
+            };
 
             if !merge_dirs {
                 for item_id in &archive_items {

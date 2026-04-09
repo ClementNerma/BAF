@@ -159,8 +159,8 @@ impl<S: Read + Seek> Archive<S> {
 
     /// Get the list of all children directories and files inside the provided directory
     ///
-    /// This method returns IDs ; to get iterators instead, use [`Self::read_dir`]
-    pub fn get_dir_content(
+    /// This method returns IDs ; to get iterators instead, use [`Self::read_dir_iter`]
+    pub fn read_dir(
         &self,
         id: DirectoryIdOrRoot,
     ) -> Result<(&HashSet<DirectoryId>, &HashSet<FileId>)> {
@@ -178,8 +178,11 @@ impl<S: Read + Seek> Archive<S> {
 
     /// Iterate over all items inside a directory contained inside the archive
     ///
-    /// If you only need IDs, you can get them directly in a [`HashSet`] by using [`Self::get_dir_content`]
-    pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
+    /// If you only need IDs, you can get them directly in a [`HashSet`] by using [`Self::read_dir`]
+    pub fn read_dir_iter(
+        &self,
+        id: DirectoryIdOrRoot,
+    ) -> Result<impl Iterator<Item = DirEntry<'_>>> {
         let dir_content = self
             .dirs_content
             .get(&id)
@@ -195,6 +198,14 @@ impl<S: Read + Seek> Archive<S> {
                     .iter()
                     .map(|file_id| DirEntry::File(self.files.get(file_id).unwrap())),
             ))
+    }
+
+    /// Iterate over all items inside a directory contained inside the archive, recursively
+    pub fn read_dir_recursive(
+        &self,
+        dir_id: DirectoryIdOrRoot,
+    ) -> Result<impl Iterator<Item = DirEntry<'_>>> {
+        ArchiveIter::new(self, dir_id)
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
@@ -231,18 +242,9 @@ impl<S: Read + Seek> Archive<S> {
     /// Parent directories are yielded before their content,
     /// and children directories before adjacent files.
     ///
-    /// Directories and files themselves are unordered. Note that the exact
-    /// order you get may also change between two runs.
-    pub fn unordered_iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
-        ArchiveIter::new(self, false)
-    }
-
-    /// Equivalent to [`Self::unordered_iter`] but directories' content is sorted
-    /// in ascending name order (UTF-8-aware sorting)
-    ///
-    /// There is a small performance cost as all items must be sorted.
-    pub fn ordered_iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
-        ArchiveIter::new(self, true)
+    /// Directories and files themselves are ordered in ascending name order (UTF-8 aware sorting).
+    pub fn items_iter(&self) -> impl Iterator<Item = DirEntry<'_>> {
+        ArchiveIter::new(self, DirectoryIdOrRoot::Root).unwrap()
     }
 }
 

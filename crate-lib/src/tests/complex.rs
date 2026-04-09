@@ -114,16 +114,19 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
     assert_eq!(archive.files().next().unwrap().name.deref(), "file_renamed");
 
     assert_eq!(
-        archive.read_dir(DirectoryIdOrRoot::Root).unwrap().count(),
+        archive
+            .read_dir_iter(DirectoryIdOrRoot::Root)
+            .unwrap()
+            .count(),
         1
     );
     assert!(
-        matches!(archive.read_dir(DirectoryIdOrRoot::Root).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name.deref() == "dir_renamed")
+        matches!(archive.read_dir_iter(DirectoryIdOrRoot::Root).unwrap().next().unwrap(), DirEntry::Directory(dir) if dir.name.deref() == "dir_renamed")
     );
 
     assert_eq!(
         archive
-            .read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(
+            .read_dir_iter(DirectoryIdOrRoot::NonRoot(DirectoryId(
                 NonZero::new(1).unwrap()
             )))
             .unwrap()
@@ -131,7 +134,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
         1
     );
     assert!(
-        matches!(archive.read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(NonZero::new(1).unwrap()))).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
+        matches!(archive.read_dir_iter(DirectoryIdOrRoot::NonRoot(DirectoryId(NonZero::new(1).unwrap()))).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
     let mut file_content = vec![];

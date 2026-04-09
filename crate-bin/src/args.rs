@@ -49,7 +49,17 @@ pub enum Action {
     },
 
     Extract {
-        #[clap(help = "Directory to extract the archive into (default: current directory)")]
+        #[clap(
+            short = 'i',
+            long = "items",
+            help = "Items to extract (files or directories) (default: extract everything)"
+        )]
+        items_to_extract: Vec<String>,
+
+        #[clap(
+            long = "to",
+            help = "Directory to extract the archive into (default: current directory)"
+        )]
         output_dir: Option<PathBuf>,
 
         #[clap(

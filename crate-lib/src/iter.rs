@@ -15,28 +15,16 @@ pub struct ArchiveIter<'a, R: Read + Seek> {
     archive: &'a Archive<R>,
     dir_id: DirectoryIdOrRoot,
     state: IterState<'a, R>,
-    ordered: bool,
 }
 
 impl<'a, R: Read + Seek> ArchiveIter<'a, R> {
-    pub(crate) fn new(archive: &'a Archive<R>, ordered: bool) -> Self {
-        Self::new_for_dir(archive, DirectoryIdOrRoot::Root, ordered).unwrap()
-    }
-
-    fn new_for_dir(
-        archive: &'a Archive<R>,
-        dir_id: DirectoryIdOrRoot,
-        ordered: bool,
-    ) -> Result<Self> {
+    pub(crate) fn new(archive: &'a Archive<R>, dir_id: DirectoryIdOrRoot) -> Result<Self> {
         let (dirs, _) = archive
-            .get_dir_content(dir_id)
+            .read_dir(dir_id)
             .context("Provided directory ID was not found")?;
 
         let mut dirs = dirs.iter().copied().collect::<Vec<_>>();
-
-        if ordered {
-            dirs.sort_by_key(|dir_id| &archive.get_dir(*dir_id).unwrap().name);
-        }
+        dirs.sort_by_key(|dir_id| &archive.get_dir(*dir_id).unwrap().name);
 
         // We .pop() from the Vec<_> during iteration
         dirs.reverse();
@@ -48,7 +36,6 @@ impl<'a, R: Read + Seek> ArchiveIter<'a, R> {
                 curr: None,
                 next: dirs,
             },
-            ordered,
         })
     }
 }
@@ -63,26 +50,18 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
                 None => match next.pop() {
                     Some(next) => {
                         *curr = Some(Box::new(
-                            ArchiveIter::new_for_dir(
-                                self.archive,
-                                DirectoryIdOrRoot::NonRoot(next),
-                                self.ordered,
-                            )
-                            .unwrap(),
+                            ArchiveIter::new(self.archive, DirectoryIdOrRoot::NonRoot(next))
+                                .unwrap(),
                         ));
 
                         Some(DirEntry::Directory(self.archive.get_dir(next).unwrap()))
                     }
                     None => {
-                        let (_, files) = self.archive.get_dir_content(self.dir_id).unwrap();
+                        let (_, files) = self.archive.read_dir(self.dir_id).unwrap();
 
                         let mut files = files.iter().copied().collect::<Vec<_>>();
 
-                        if self.ordered {
-                            files.sort_by_key(|file_id| {
-                                &self.archive.get_file(*file_id).unwrap().name
-                            });
-                        }
+                        files.sort_by_key(|file_id| &self.archive.get_file(*file_id).unwrap().name);
 
                         // We .pop() from the Vec<_> during iteration
                         files.reverse();

@@ -15,7 +15,7 @@ impl ArchiveContentTree {
         // Build root nodes
         let mut root_nodes = Vec::new();
 
-        let (dir_ids, file_ids) = archive.get_dir_content(DirectoryIdOrRoot::Root).unwrap();
+        let (dir_ids, file_ids) = archive.read_dir(DirectoryIdOrRoot::Root).unwrap();
 
         // Add root directories
         for dir_id in dir_ids {
@@ -50,7 +50,7 @@ fn build_dir_node(dir_id: DirId, archive: &Archive<impl Read + Seek>) -> TreeNod
     let mut node = TreeNode::new_dir(archive.get_dir(dir_id).unwrap().name.clone().into_string());
 
     let (dir_ids, file_ids) = archive
-        .get_dir_content(DirectoryIdOrRoot::NonRoot(dir_id))
+        .read_dir(DirectoryIdOrRoot::NonRoot(dir_id))
         .unwrap();
 
     // Add subdirectories
