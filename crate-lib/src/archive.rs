@@ -956,6 +956,14 @@ pub enum DirEntry<'a> {
 }
 
 impl<'a> DirEntry<'a> {
+    /// Get the item's ID
+    pub fn id(&self) -> ItemId {
+        match self {
+            DirEntry::Directory(dir) => ItemId::Directory(dir.id),
+            DirEntry::File(file) => ItemId::File(file.id),
+        }
+    }
+
     /// Get the item's name
     pub fn name(&self) -> &ItemName {
         match self {

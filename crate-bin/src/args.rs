@@ -47,4 +47,9 @@ pub enum Action {
         )]
         overwrite_files: bool,
     },
+
+    Extract {
+        #[clap(help = "Directory to extract the archive into (default: current directory)")]
+        output_dir: Option<PathBuf>,
+    },
 }

@@ -5,6 +5,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
+    io,
     num::NonZero,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -12,7 +13,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use baf::{Archive, ArchiveConfig, DirEntry, Timestamp};
+use baf::{Archive, ArchiveConfig, DirEntry, ItemId, Timestamp};
 use clap::Parser;
 use log::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -234,6 +235,79 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             archive.flush().context("Failed to close archive")?;
 
             info!("Done!");
+        }
+
+        Action::Extract { output_dir } => {
+            let output_dir = match output_dir {
+                Some(dir) => {
+                    if !dir.is_dir() {
+                        bail!(
+                            "Provided output path '{}' is not a directory",
+                            dir.display()
+                        );
+                    }
+
+                    dir
+                }
+
+                None => std::env::current_dir()
+                    .context("Failed to get current directory for extraction")?,
+            };
+
+            let mut archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
+                .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
+
+            for item_id in archive
+                .ordered_iter()
+                .map(|item| item.id())
+                .collect::<Vec<_>>()
+            {
+                match item_id {
+                    ItemId::Directory(dir_id) => {
+                        let path = archive.with_paths().compute_dir_path(dir_id).unwrap();
+                        debug!("Creating output directory: {path}");
+
+                        let output_path = output_dir.join(path);
+
+                        fs::create_dir(&output_path).with_context(|| {
+                            format!(
+                                "Failed to create output directory at path '{}'",
+                                output_path.display()
+                            )
+                        })?;
+                    }
+
+                    ItemId::File(file_id) => {
+                        let path = archive.with_paths().compute_file_path(file_id).unwrap();
+                        debug!("Extracting output file: {path}");
+
+                        let output_path = output_dir.join(&path);
+
+                        let mut file = archive.read_file(file_id).with_context(|| {
+                            format!("Failed to read file with id {path} from archive")
+                        })?;
+
+                        let mut output_file = File::create(&output_path).with_context(|| {
+                            format!(
+                                "Failed to create output file at path '{}'",
+                                output_path.display()
+                            )
+                        })?;
+
+                        io::copy(&mut file, &mut output_file).with_context(|| {
+                            format!(
+                                "Failed to write to output file at path '{}'",
+                                output_path.display()
+                            )
+                        })?;
+                    }
+                }
+            }
+
+            info!(
+                "Successfully extracted archive to '{}'",
+                output_dir.display()
+            );
         }
     }
 
