@@ -36,15 +36,15 @@ pub enum Action {
         under_dir: Option<String>,
 
         #[clap(
-            long = "merge-dirs",
+            long,
             help = "Merge with existing directories if they already exist in the archive"
         )]
         merge_dirs: bool,
 
         #[clap(
-            long = "merge-files",
-            help = "Merge with existing files if they already exist in the archive"
+            long,
+            help = "Overwrite existing files if they already exist in the archive"
         )]
-        merge_files: bool,
+        overwrite_files: bool,
     },
 }

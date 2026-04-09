@@ -97,7 +97,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             items_path,
             under_dir,
             merge_dirs,
-            merge_files,
+            overwrite_files,
         } => {
             for item_path in &items_path {
                 if !item_path.exists() {
@@ -162,7 +162,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             } in &files
             {
                 if archive.with_paths().get_item_at(path_in_archive).is_some() {
-                    if !merge_files {
+                    if !overwrite_files {
                         bail!(
                             "Failed to add file '{}' to archive: path already exists in the archive",
                             path_in_archive
