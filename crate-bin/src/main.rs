@@ -237,7 +237,11 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             info!("Done!");
         }
 
-        Action::Extract { output_dir } => {
+        Action::Extract {
+            output_dir,
+            merge_dirs,
+            overwrite_files,
+        } => {
             let output_dir = match output_dir {
                 Some(dir) => {
                     if !dir.is_dir() {
@@ -257,11 +261,44 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             let mut archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
                 .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
 
-            for item_id in archive
+            let archive_items = archive
                 .ordered_iter()
                 .map(|item| item.id())
-                .collect::<Vec<_>>()
-            {
+                .collect::<Vec<_>>();
+
+            if !merge_dirs {
+                for item_id in &archive_items {
+                    if let ItemId::Directory(dir_id) = item_id {
+                        let path = archive.with_paths().compute_dir_path(*dir_id).unwrap();
+                        let output_path = output_dir.join(&path);
+
+                        if output_path.exists() {
+                            bail!(
+                                "Failed to extract archive: output directory '{}' already exists",
+                                output_path.display()
+                            );
+                        }
+                    }
+                }
+            }
+
+            if !overwrite_files {
+                for item_id in &archive_items {
+                    if let ItemId::File(file_id) = item_id {
+                        let path = archive.with_paths().compute_file_path(*file_id).unwrap();
+                        let output_path = output_dir.join(&path);
+
+                        if output_path.exists() {
+                            bail!(
+                                "Failed to extract archive: output file '{}' already exists",
+                                output_path.display()
+                            );
+                        }
+                    }
+                }
+            }
+
+            for item_id in archive_items {
                 match item_id {
                     ItemId::Directory(dir_id) => {
                         let path = archive.with_paths().compute_dir_path(dir_id).unwrap();

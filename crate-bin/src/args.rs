@@ -51,5 +51,17 @@ pub enum Action {
     Extract {
         #[clap(help = "Directory to extract the archive into (default: current directory)")]
         output_dir: Option<PathBuf>,
+
+        #[clap(
+            long,
+            help = "Merge with existing directories if they already exist in the output directory"
+        )]
+        merge_dirs: bool,
+
+        #[clap(
+            long,
+            help = "Overwrite existing files if they already exist in the output directory"
+        )]
+        overwrite_files: bool,
     },
 }
