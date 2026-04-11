@@ -70,7 +70,7 @@ impl<'a, S: Read + Write + Seek> WithPathsMut<'a, S> {
 
             let item = self
                 .archive
-                .read_dir_iter(curr_id)
+                .read_dir(curr_id)
                 .unwrap()
                 .find(|item| item.name() == segment);
 

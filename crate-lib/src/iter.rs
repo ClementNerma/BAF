@@ -20,7 +20,7 @@ pub struct ArchiveIter<'a, R: Read + Seek> {
 impl<'a, R: Read + Seek> ArchiveIter<'a, R> {
     pub(crate) fn new(archive: &'a Archive<R>, dir_id: DirectoryIdOrRoot) -> Result<Self> {
         let (dirs, _) = archive
-            .read_dir(dir_id)
+            .get_dir_content(dir_id)
             .context("Provided directory ID was not found")?;
 
         let mut dirs = dirs.iter().copied().collect::<Vec<_>>();
@@ -57,7 +57,7 @@ impl<'a, R: Read + Seek> Iterator for ArchiveIter<'a, R> {
                         Some(DirEntry::Directory(self.archive.get_dir(next).unwrap()))
                     }
                     None => {
-                        let (_, files) = self.archive.read_dir(self.dir_id).unwrap();
+                        let (_, files) = self.archive.get_dir_content(self.dir_id).unwrap();
 
                         let mut files = files.iter().copied().collect::<Vec<_>>();
 
