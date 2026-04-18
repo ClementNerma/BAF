@@ -4,6 +4,7 @@ use clap::Parser;
 use log::LevelFilter;
 
 #[derive(Parser)]
+#[clap(name = "baf", version, author, about)]
 pub struct CmdArgs {
     #[clap(help = "Path to the archive")]
     pub path: PathBuf,

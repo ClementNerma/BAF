@@ -1,3 +1,8 @@
+use std::time::SystemTime;
+
+use baf::Timestamp;
+use jiff::fmt::rfc2822::DateTimePrinter;
+
 /// Convert a size in bytes to a human-readable string with the specified precision
 pub fn human_size(size: u64, precision: Option<u8>) -> String {
     let units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -49,4 +54,17 @@ fn approx_int_div(a: u64, b: u64, precision: u8) -> String {
     }
 
     out
+}
+
+/// Convert a timestamp in milliseconds since the UNIX epoch to a human-readable string
+pub fn human_time(timestamp: Timestamp) -> String {
+    let Ok(zdt) = jiff::Zoned::try_from(SystemTime::from(timestamp)) else {
+        return "<invalid timestamp>".to_string();
+    };
+
+    let mut buf = String::new();
+
+    DateTimePrinter::new().print_zoned(&zdt, &mut buf).unwrap();
+
+    buf
 }

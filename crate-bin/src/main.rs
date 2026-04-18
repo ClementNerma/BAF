@@ -15,6 +15,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use baf::{Archive, ArchiveConfig, DirEntry, DirectoryIdOrRoot, ItemId, ItemIdOrRoot, Timestamp};
 use clap::Parser;
+use colored::Colorize;
 use log::{debug, error, info, warn};
 use walkdir::WalkDir;
 
@@ -22,7 +23,7 @@ use self::{
     args::{Action, CmdArgs},
     logger::Logger,
     tree::ArchiveContentTree,
-    utils::human_size,
+    utils::{human_size, human_time},
 };
 
 mod args;
@@ -78,9 +79,10 @@ fn inner_main(args: CmdArgs) -> Result<()> {
 
                     DirEntry::File(file) => {
                         info!(
-                            "|> {} ({})",
+                            "|> {} ({}, modified on {})",
                             archive.with_paths().compute_file_path(file.id).unwrap(),
-                            human_size(file.content_len, Some(2)),
+                            human_size(file.content_len, Some(2)).bright_yellow(),
+                            human_time(file.modif_time).bright_green()
                         );
                     }
                 }
