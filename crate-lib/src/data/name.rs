@@ -1,7 +1,5 @@
 use std::{borrow::Borrow, fmt::Display, io::Read, ops::Deref};
 
-use anyhow::Result;
-
 use crate::source::Source;
 
 /// Representation of an item's (file or directory) name
@@ -41,13 +39,22 @@ impl ItemName {
 
     pub(crate) fn consume_from_reader(
         source: &mut Source<impl Read>,
-    ) -> Result<Result<Self, NameDecodingError>> {
+    ) -> std::io::Result<Result<Self, NameDecodingError>> {
         source.read_into_array::<256>().map(Self::decode)
     }
 
     /// Decode an item name from a list of bytes
     pub fn decode(bytes: [u8; 256]) -> Result<Self, NameDecodingError> {
         let len = usize::from(bytes[0]);
+
+        if len == 0 {
+            return Err(NameDecodingError {
+                bytes: bytes.to_vec(),
+                cause: NameDecodingErrorReason::NameValidationFailed(
+                    NameValidationError::NameIsEmpty,
+                ),
+            });
+        }
 
         let name = std::str::from_utf8(&bytes[1..=len]).map_err(|_| NameDecodingError {
             bytes: bytes.to_vec(),
@@ -143,6 +150,17 @@ pub enum NameValidationError {
     ForbiddenName(&'static str),
 }
 
+impl Display for NameDecodingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to decode name (bytes: {}): {}",
+            self.bytes.len(),
+            self.cause
+        )
+    }
+}
+
 impl Display for NameDecodingErrorReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -162,3 +180,9 @@ impl Display for NameValidationError {
         }
     }
 }
+
+impl std::error::Error for NameValidationError {}
+
+impl std::error::Error for NameDecodingError {}
+
+impl std::error::Error for NameDecodingErrorReason {}

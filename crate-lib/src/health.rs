@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use thiserror::Error;
 
 use crate::{
     DirectoryId, DirectoryIdOrRoot, FileId, ItemId, ItemName, data::ft_segment::FileTableSegment,
@@ -9,7 +9,7 @@ use crate::{
 // TODO: return computed DirContent
 pub fn check_file_table_correctness(
     segments: &[FileTableSegment],
-) -> Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<FileTableCorrectnessError>> {
+) -> std::result::Result<HashMap<DirectoryIdOrRoot, DirContent>, Vec<FileTableCorrectnessError>> {
     let mut errors = vec![];
     let mut dirs_content = HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]);
 
@@ -33,7 +33,12 @@ pub fn check_file_table_correctness(
                 .or_default(),
         };
 
-        assert!(parent_dir_content.dirs.insert(dir.id));
+        if !parent_dir_content.dirs.insert(dir.id) {
+            errors.push(FileTableCorrectnessError::DuplicateDirectoryId {
+                faulty_dir_id: dir.id,
+                faulty_dir_name: dir.name.clone(),
+            });
+        }
 
         if !parent_dir_content.names.insert(dir.name.clone()) {
             errors.push(FileTableCorrectnessError::DuplicateItemInDirName {
@@ -52,7 +57,12 @@ pub fn check_file_table_correctness(
                 .or_default(),
         };
 
-        assert!(parent_dir_content.files.insert(file.id));
+        if !parent_dir_content.files.insert(file.id) {
+            errors.push(FileTableCorrectnessError::DuplicateFileId {
+                faulty_file_id: file.id,
+                faulty_file_name: file.name.clone(),
+            });
+        }
 
         if !parent_dir_content.names.insert(file.name.clone()) {
             errors.push(FileTableCorrectnessError::DuplicateItemInDirName {
@@ -71,9 +81,10 @@ pub fn check_file_table_correctness(
 }
 
 /// Error while validating the correctness of an archive's file table
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum FileTableCorrectnessError {
     /// At least two directories have the same ID
+    #[error("Duplicate directory ID {faulty_dir_id:?} (name: '{faulty_dir_name}')")]
     DuplicateDirectoryId {
         /// Second directory to use the ID
         faulty_dir_id: DirectoryId,
@@ -82,7 +93,18 @@ pub enum FileTableCorrectnessError {
         faulty_dir_name: ItemName,
     },
 
+    /// At least two files have the same ID
+    #[error("Duplicate file ID {faulty_file_id:?} (name: '{faulty_file_name}')")]
+    DuplicateFileId {
+        /// Second file to use the ID
+        faulty_file_id: FileId,
+
+        /// Second file's name
+        faulty_file_name: ItemName,
+    },
+
     /// At least two items have the same name in the same parent directory
+    #[error("Duplicate item name '{faulty_item_name}' in parent directory {parent_dir_id:?}")]
     DuplicateItemInDirName {
         /// Second item to use the name
         faulty_item_id: ItemId,

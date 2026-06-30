@@ -4,8 +4,9 @@ version = "0.1.2"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.102"
 sha3 = "0.12.0"
+thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+bolero = "0.13.4"

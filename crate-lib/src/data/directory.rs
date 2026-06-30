@@ -3,7 +3,7 @@ use std::{
     num::NonZero,
 };
 
-use anyhow::Result;
+use thiserror::Error;
 
 use crate::{
     ensure_only_one_version,
@@ -100,23 +100,26 @@ impl Directory {
         bytes.extend(name.encode());
         bytes.extend(modif_time.encode());
 
-        assert_eq!(bytes.len(), DIRECTORY_ENTRY_SIZE);
+        debug_assert_eq!(bytes.len(), DIRECTORY_ENTRY_SIZE);
 
         bytes
     }
 }
 
 /// Error while decoding a directory's informations
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum DirectoryDecodingError {
     /// Native I/O error
-    IoError(anyhow::Error),
+    #[error("I/O error while decoding directory entry: {0}")]
+    IoError(std::io::Error),
 
     /// The entry is invalid
-    InvalidEntry(anyhow::Error),
+    #[error("Invalid directory entry: {0}")]
+    InvalidEntry(std::io::Error),
 
     /// The directory's name is invalid
-    InvalidName(NameDecodingError),
+    #[error("Invalid directory name: {0}")]
+    InvalidName(#[from] NameDecodingError),
 }
 
 /// ID of a directory, unique inside a given archive
@@ -140,7 +143,7 @@ pub enum DirectoryIdOrRoot {
 }
 
 impl FromSourceBytes for DirectoryIdOrRoot {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {

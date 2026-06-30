@@ -39,17 +39,20 @@ impl Coverage {
         }
 
         if let Some(next) = self.segments.iter().find(|segment| segment.start >= start) {
-            assert!(next.start + next.len >= start + len);
+            assert!(start + len <= next.start);
         }
 
         self.segments.insert(Segment { start, len });
     }
 
     /// Mark as zone as free (unused)
-    pub fn mark_as_free(&mut self, segment: Segment) {
+    ///
+    /// Returns `true` if the segment was found and freed, `false` if it was not tracked.
+    pub fn mark_as_free(&mut self, segment: Segment) -> bool {
         if segment.len > 0 {
-            // TODO: support non-exact segments
-            assert!(self.segments.remove(&segment));
+            self.segments.remove(&segment)
+        } else {
+            false
         }
     }
 
@@ -84,7 +87,7 @@ pub struct Segment {
 
 impl Ord for Segment {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.start.cmp(&other.start)
+        self.start.cmp(&other.start).then(self.len.cmp(&other.len))
     }
 }
 
@@ -117,40 +120,42 @@ impl<'a> Iterator for FreeSegmentsIter<'a> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.yielded_last {
-            return None;
-        }
-
-        let next_segment = self.segments_iter.next();
-
-        match next_segment {
-            Some(segment) => {
-                if segment.start == self.prev_end {
-                    self.prev_end += segment.len;
-                    return self.next();
-                }
-
-                assert!(segment.start > self.prev_end);
-
-                let prev_end = self.prev_end;
-                self.prev_end = segment.start + segment.len;
-
-                Some(Segment {
-                    start: prev_end,
-                    len: segment.start - prev_end,
-                })
+        loop {
+            if self.yielded_last {
+                return None;
             }
 
-            None => {
-                self.yielded_last = true;
+            let next_segment = self.segments_iter.next();
 
-                if self.prev_end < self.coverage.len {
-                    Some(Segment {
-                        start: self.prev_end,
-                        len: self.coverage.len - self.prev_end,
-                    })
-                } else {
-                    None
+            match next_segment {
+                Some(segment) => {
+                    if segment.start == self.prev_end {
+                        self.prev_end += segment.len;
+                        continue;
+                    }
+
+                    assert!(segment.start > self.prev_end);
+
+                    let prev_end = self.prev_end;
+                    self.prev_end = segment.start + segment.len;
+
+                    return Some(Segment {
+                        start: prev_end,
+                        len: segment.start - prev_end,
+                    });
+                }
+
+                None => {
+                    self.yielded_last = true;
+
+                    if self.prev_end < self.coverage.len {
+                        return Some(Segment {
+                            start: self.prev_end,
+                            len: self.coverage.len - self.prev_end,
+                        });
+                    } else {
+                        return None;
+                    }
                 }
             }
         }

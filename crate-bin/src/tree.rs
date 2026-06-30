@@ -12,26 +12,22 @@ pub struct ArchiveContentTree {
 impl ArchiveContentTree {
     /// Build the tree structure from directory map and file list
     pub fn build(archive: &Archive<impl Read + Seek>) -> Self {
-        // Build root nodes
         let mut root_nodes = Vec::new();
 
-        let (dir_ids, file_ids) = archive.get_dir_content(DirectoryIdOrRoot::Root).unwrap();
+        let (dir_ids, file_ids) = archive
+            .get_dir_content(DirectoryIdOrRoot::Root)
+            .map_or((Default::default(), Default::default()), |(d, f)| (d.clone(), f.clone()));
 
         // Add root directories
         for dir_id in dir_ids {
-            root_nodes.push(build_dir_node(*dir_id, archive));
+            root_nodes.push(build_dir_node(dir_id, archive));
         }
 
         // Add root files
         for file_id in file_ids {
-            root_nodes.push(TreeNode::new_file(
-                archive
-                    .get_file(*file_id)
-                    .unwrap()
-                    .name
-                    .clone()
-                    .into_string(),
-            ));
+            if let Some(file) = archive.get_file(file_id) {
+                root_nodes.push(TreeNode::new_file(file.name.clone().into_string()));
+            }
         }
 
         // Sort roots
@@ -47,27 +43,25 @@ impl ArchiveContentTree {
 
 // Recursive function to build tree nodes
 fn build_dir_node(dir_id: DirId, archive: &Archive<impl Read + Seek>) -> TreeNode {
-    let mut node = TreeNode::new_dir(archive.get_dir(dir_id).unwrap().name.clone().into_string());
+    let Some(dir) = archive.get_dir(dir_id) else {
+        return TreeNode::new_dir(String::from("<error>"));
+    };
+    let mut node = TreeNode::new_dir(dir.name.clone().into_string());
 
     let (dir_ids, file_ids) = archive
         .get_dir_content(DirectoryIdOrRoot::NonRoot(dir_id))
-        .unwrap();
+        .map_or((Default::default(), Default::default()), |(d, f)| (d.clone(), f.clone()));
 
     // Add subdirectories
     for dir_id in dir_ids {
-        node.children.push(build_dir_node(*dir_id, archive));
+        node.children.push(build_dir_node(dir_id, archive));
     }
 
     // Add files
     for file_id in file_ids {
-        node.children.push(TreeNode::new_file(
-            archive
-                .get_file(*file_id)
-                .unwrap()
-                .name
-                .clone()
-                .into_string(),
-        ));
+        if let Some(file) = archive.get_file(file_id) {
+            node.children.push(TreeNode::new_file(file.name.clone().into_string()));
+        }
     }
 
     // Sort: directories first, then files, alphabetically within each group

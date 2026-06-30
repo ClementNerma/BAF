@@ -73,14 +73,14 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                     DirEntry::Directory(directory) => {
                         info!(
                             "|  {}/",
-                            archive.with_paths().compute_dir_path(directory.id).unwrap()
+                            archive.with_paths().compute_dir_path(directory.id)?
                         );
                     }
 
                     DirEntry::File(file) => {
                         info!(
                             "|> {} ({}, modified on {})",
-                            archive.with_paths().compute_file_path(file.id).unwrap(),
+                            archive.with_paths().compute_file_path(file.id)?,
                             human_size(file.content_len, Some(2)).bright_yellow(),
                             human_time(file.modif_time).bright_green()
                         );
@@ -222,7 +222,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                 debug!(
                     "> Adding file: {} ({})",
                     real_path.display(),
-                    human_size(*files_size.get(&real_path).unwrap(), Some(2))
+                    human_size(*files_size.get(&real_path).with_context(|| format!("Failed to get size for file '{}'", real_path.display()))?, Some(2))
                 );
 
                 let file = File::open(real_path)
@@ -298,8 +298,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
 
                             to_extract_ids.extend(
                                 archive
-                                    .read_dir_recursive(DirectoryIdOrRoot::NonRoot(dir))
-                                    .unwrap()
+                                    .read_dir_recursive(DirectoryIdOrRoot::NonRoot(dir))?
                                     .map(|item| item.id()),
                             );
                         }
@@ -316,7 +315,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             if !merge_dirs {
                 for item_id in &archive_items {
                     if let ItemId::Directory(dir_id) = item_id {
-                        let path = archive.with_paths().compute_dir_path(*dir_id).unwrap();
+                        let path = archive.with_paths().compute_dir_path(*dir_id)?;
                         let output_path = output_dir.join(&path);
 
                         if output_path.exists() {
@@ -332,7 +331,7 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             if !overwrite_files {
                 for item_id in &archive_items {
                     if let ItemId::File(file_id) = item_id {
-                        let path = archive.with_paths().compute_file_path(*file_id).unwrap();
+                        let path = archive.with_paths().compute_file_path(*file_id)?;
                         let output_path = output_dir.join(&path);
 
                         if output_path.exists() {
@@ -448,7 +447,7 @@ fn find_items_to_add<P: AsRef<Path>>(items: &[P], under_dir: Option<&str>) -> Re
 
             continue;
         } else if !mt.file_type().is_dir() {
-            bail!("Unkown item type at path '{}'", canon_path.display());
+            bail!("Unknown item type at path '{}'", canon_path.display());
         }
 
         let under_dir = match under_dir {
@@ -464,7 +463,7 @@ fn find_items_to_add<P: AsRef<Path>>(items: &[P], under_dir: Option<&str>) -> Re
             }
         };
 
-        for item in WalkDir::new(&canon_path) {
+        for item in WalkDir::new(&canon_path).follow_links(false) {
             let item = item.context("Failed to read directory")?;
 
             let stripped_path = item.path().strip_prefix(&canon_path).unwrap();
@@ -514,5 +513,5 @@ fn get_item_mtime(path: &Path) -> Result<Timestamp> {
                 SystemTime::now()
             });
 
-    Ok(Timestamp::from(mtime))
+    Ok(Timestamp::try_from(mtime)?)
 }

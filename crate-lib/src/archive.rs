@@ -6,8 +6,8 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result, bail};
 use sha3::{Digest, Sha3_256};
+use thiserror::Error;
 
 use crate::{
     WithPathsMut,
@@ -20,11 +20,11 @@ use crate::{
         },
         file::{FILE_ENTRY_SIZE, FILE_NAME_OFFSET_IN_ENTRY, File, FileId},
         ft_segment::{FileTableSegment, FileTableSegmentDecodingError},
-        header::{ArchiveVersion, HEADER_SIZE, Header},
+        header::{ArchiveVersion, HEADER_SIZE, Header, HeaderDecodingError},
         name::ItemName,
         timestamp::Timestamp,
     },
-    file_reader::FileReader,
+    file_reader::{FileReader, FileReaderError},
     health::{DirContent, FileTableCorrectnessError, check_file_table_correctness},
     iter::ArchiveIter,
     source::Source,
@@ -45,6 +45,7 @@ pub struct Archive<S: Read + Seek> {
     files: HashMap<FileId, File>,
     dirs_content: HashMap<DirectoryIdOrRoot, DirContent>,
     coverage: Coverage,
+    next_id: NonZero<u64>,
 }
 
 impl<S: Read + Seek> Archive<S> {
@@ -56,18 +57,15 @@ impl<S: Read + Seek> Archive<S> {
     pub fn open(source: S, conf: ArchiveConfig) -> Result<Self, ArchiveMetadataDecodingError> {
         let mut source = Source::new(source);
 
-        let mut source_with_header =
-            Header::decode(&mut source).map_err(ArchiveMetadataDecodingError::InvalidHeader)?;
+        let mut source_with_header = Header::decode(&mut source)?;
         let header = source_with_header.header;
 
         let mut file_segments = vec![];
         let mut file_segments_addr = vec![HEADER_SIZE as u64];
-        let mut prev_segment = FileTableSegment::decode(&mut source_with_header)
-            .map_err(ArchiveMetadataDecodingError::InvalidFileTableSegment)?;
+        let mut prev_segment = FileTableSegment::decode(&mut source_with_header)?;
 
         while let Some(next_segment) = prev_segment.consume_next_segment(&mut source_with_header) {
-            let next_segment =
-                next_segment.map_err(ArchiveMetadataDecodingError::InvalidFileTableSegment)?;
+            let next_segment = next_segment?;
 
             file_segments.push(prev_segment);
 
@@ -106,6 +104,14 @@ impl<S: Read + Seek> Archive<S> {
         let dirs_content = check_file_table_correctness(&file_segments)
             .map_err(ArchiveMetadataDecodingError::FileTableCorrectnessError)?;
 
+        let max_id = dirs
+            .keys()
+            .map(|id| id.inner())
+            .chain(files.keys().map(|id| id.inner()))
+            .max();
+
+        let next_id = NonZero::new(max_id.map_or(1, |max| max.get() + 1)).unwrap();
+
         Ok(Self {
             source,
             conf,
@@ -115,6 +121,7 @@ impl<S: Read + Seek> Archive<S> {
             file_segments,
             dirs_content,
             coverage,
+            next_id,
         })
     }
 
@@ -163,7 +170,7 @@ impl<S: Read + Seek> Archive<S> {
     pub fn get_dir_content(
         &self,
         id: DirectoryIdOrRoot,
-    ) -> Result<(&HashSet<DirectoryId>, &HashSet<FileId>)> {
+    ) -> Result<(&HashSet<DirectoryId>, &HashSet<FileId>), ArchiveError> {
         let DirContent {
             dirs,
             files,
@@ -171,7 +178,7 @@ impl<S: Read + Seek> Archive<S> {
         } = self
             .dirs_content
             .get(&id)
-            .context("Provided directory ID was not found")?;
+            .ok_or(ArchiveError::DirectoryNotFound)?;
 
         Ok((dirs, files))
     }
@@ -179,11 +186,14 @@ impl<S: Read + Seek> Archive<S> {
     /// Iterate over all items inside a directory contained inside the archive
     ///
     /// If you only need IDs, you can get them directly in a [`HashSet`] by using [`Self::get_dir_content`]
-    pub fn read_dir(&self, id: DirectoryIdOrRoot) -> Result<impl Iterator<Item = DirEntry<'_>>> {
+    pub fn read_dir(
+        &self,
+        id: DirectoryIdOrRoot,
+    ) -> Result<impl Iterator<Item = DirEntry<'_>>, ArchiveError> {
         let dir_content = self
             .dirs_content
             .get(&id)
-            .context("Provided directory ID was not found")?;
+            .ok_or(ArchiveError::DirectoryNotFound)?;
 
         Ok(dir_content
             .dirs
@@ -201,13 +211,13 @@ impl<S: Read + Seek> Archive<S> {
     pub fn read_dir_recursive(
         &self,
         dir_id: DirectoryIdOrRoot,
-    ) -> Result<impl Iterator<Item = DirEntry<'_>>> {
+    ) -> Result<impl Iterator<Item = DirEntry<'_>>, ArchiveError> {
         ArchiveIter::new(self, dir_id)
     }
 
     /// Get a [`FileReader`] over a file contained inside the archive
-    pub fn read_file(&mut self, id: FileId) -> Result<FileReader<'_, S>> {
-        let file = self.files.get(&id).context("File not found in archive")?;
+    pub fn read_file(&mut self, id: FileId) -> Result<FileReader<'_, S>, ArchiveError> {
+        let file = self.files.get(&id).ok_or(ArchiveError::FileNotFound)?;
 
         self.source.set_position(file.content_addr)?;
 
@@ -219,13 +229,15 @@ impl<S: Read + Seek> Archive<S> {
     }
 
     /// Get the content of a file contained inside the archive into a vector of bytes
-    pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>> {
-        self.read_file(id).and_then(FileReader::read_to_vec)
+    pub fn read_file_to_vec(&mut self, id: FileId) -> Result<Vec<u8>, ArchiveError> {
+        let reader = self.read_file(id)?;
+        Ok(reader.read_to_vec()?)
     }
 
     /// Get the content of a file contained inside the archive as a string
-    pub fn read_file_to_string(&mut self, id: FileId) -> Result<String> {
-        self.read_file(id).and_then(FileReader::read_to_string)
+    pub fn read_file_to_string(&mut self, id: FileId) -> Result<String, ArchiveError> {
+        let reader = self.read_file(id)?;
+        Ok(reader.read_to_string()?)
     }
 
     /// Iterate over the list of files and directories
@@ -247,7 +259,7 @@ impl<S: Read + Seek> Archive<S> {
 
 impl<S: Read + Write + Seek> Archive<S> {
     /// Create a new archive
-    pub fn create(source: S, conf: ArchiveConfig) -> Result<Self> {
+    pub fn create(source: S, conf: ArchiveConfig) -> Result<Self, ArchiveError> {
         let mut source = Source::new(source);
 
         let header = Header::default();
@@ -288,6 +300,7 @@ impl<S: Read + Write + Seek> Archive<S> {
             dirs_content: HashMap::from([(DirectoryIdOrRoot::Root, DirContent::default())]),
             file_segments: vec![segment],
             source,
+            next_id: NonZero::new(1).unwrap(),
         })
     }
 
@@ -299,7 +312,7 @@ impl<S: Read + Write + Seek> Archive<S> {
         parent_dir: DirectoryIdOrRoot,
         name: ItemName,
         modif_time: Timestamp,
-    ) -> Result<DirectoryId> {
+    ) -> Result<DirectoryId, ArchiveError> {
         self.ensure_no_duplicate_name(&name, parent_dir)?;
 
         let SegmentEntry {
@@ -308,14 +321,8 @@ impl<S: Read + Write + Seek> Archive<S> {
             entry_addr,
         } = self.get_addr_for_item_insert(ItemType::Directory)?;
 
-        let id = self
-            .dirs
-            .keys()
-            .map(|id| id.inner())
-            .chain(self.files.keys().map(|id| id.inner()))
-            .max();
-
-        let id = DirectoryId(NonZero::new(id.map_or(1, |max| max.get() + 1)).unwrap());
+        let id = DirectoryId(self.next_id);
+        self.next_id = NonZero::new(self.next_id.get() + 1).expect("ID overflow");
 
         let dir = Directory {
             id,
@@ -355,7 +362,7 @@ impl<S: Read + Write + Seek> Archive<S> {
         name: ItemName,
         modif_time: Timestamp,
         content: impl Read + Seek,
-    ) -> Result<FileId> {
+    ) -> Result<FileId, ArchiveError> {
         let mut content = Source::new(content);
 
         self.ensure_no_duplicate_name(&name, parent_dir)?;
@@ -371,14 +378,8 @@ impl<S: Read + Write + Seek> Archive<S> {
         let (content_addr, sha3_checksum) = self.write_data_where_possible(content)?;
 
         // Get a new ID for the file
-        let id = self
-            .dirs
-            .keys()
-            .map(|id| id.inner())
-            .chain(self.files.keys().map(|id| id.inner()))
-            .max();
-
-        let id = FileId(NonZero::new(id.map_or(1, |max| max.get() + 1)).unwrap());
+        let id = FileId(self.next_id);
+        self.next_id = NonZero::new(self.next_id.get() + 1).expect("ID overflow");
 
         let file = File {
             id,
@@ -416,14 +417,14 @@ impl<S: Read + Write + Seek> Archive<S> {
         id: FileId,
         new_modif_time: Timestamp,
         new_content: impl Read + Seek,
-    ) -> Result<()> {
+    ) -> Result<(), ArchiveError> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
         } = self
             .get_item_entry(ItemId::File(id))
-            .context("Provided file ID was not found")?;
+            .ok_or(ArchiveError::FileNotFound)?;
 
         let mut new_content = Source::new(new_content);
 
@@ -431,7 +432,7 @@ impl<S: Read + Write + Seek> Archive<S> {
 
         let content_len = new_content.seek_len()?;
 
-        self.coverage.mark_as_free(Segment {
+        let _ = self.coverage.mark_as_free(Segment {
             start: file.content_addr,
             len: file.content_len,
         });
@@ -439,17 +440,17 @@ impl<S: Read + Write + Seek> Archive<S> {
         let (content_addr, sha3_checksum) = self.write_data_where_possible(new_content)?;
 
         // Update file metadata
-        let mut new_file = self.files.get_mut(&id).unwrap().clone();
+        let sha3_checksum_bytes = sha3_checksum.finalize();
+
+        let new_file = self.files.get_mut(&id).unwrap();
         new_file.content_addr = content_addr;
         new_file.content_len = content_len;
-        new_file.sha3_checksum = sha3_checksum.clone().finalize().into();
+        new_file.sha3_checksum = sha3_checksum_bytes.into();
         new_file.modif_time = new_modif_time;
 
+        let encoded = new_file.encode();
         self.source.set_position(entry_addr)?;
-        self.source.write_all(&new_file.encode())?;
-
-        // Update in-memory representation
-        *self.files.get_mut(&id).unwrap() = new_file.clone();
+        self.source.write_all(&encoded)?;
 
         // Update in-memory file segment
         *(self
@@ -466,16 +467,24 @@ impl<S: Read + Write + Seek> Archive<S> {
     }
 
     /// Rename a directory
-    pub fn rename_directory(&mut self, id: DirectoryId, new_name: ItemName) -> Result<()> {
+    pub fn rename_directory(
+        &mut self,
+        id: DirectoryId,
+        new_name: ItemName,
+    ) -> Result<(), ArchiveError> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(ItemId::Directory(id))?;
+        } = self
+            .get_item_entry(ItemId::Directory(id))
+            .ok_or(ArchiveError::DirectoryNotFound)?;
 
-        let dir = self.dirs.get(&id).unwrap().clone();
+        let dir = self.dirs.get(&id).unwrap();
+        let parent_dir = dir.parent_dir;
+        let old_name = dir.name.clone();
 
-        self.ensure_no_duplicate_name(&new_name, dir.parent_dir)?;
+        self.ensure_no_duplicate_name(&new_name, parent_dir)?;
 
         self.source
             .set_position(entry_addr + (DIRECTORY_NAME_OFFSET_IN_ENTRY as u64))?;
@@ -490,24 +499,28 @@ impl<S: Read + Write + Seek> Archive<S> {
 
         self.dirs.get_mut(&id).unwrap().name.clone_from(&new_name);
 
-        let parent_dir_content = self.dirs_content.get_mut(&dir.parent_dir).unwrap();
-        assert!(parent_dir_content.names.remove(&dir.name));
+        let parent_dir_content = self.dirs_content.get_mut(&parent_dir).unwrap();
+        assert!(parent_dir_content.names.remove(&old_name));
         assert!(parent_dir_content.names.insert(new_name));
 
         Ok(())
     }
 
     /// Rename a file
-    pub fn rename_file(&mut self, id: FileId, new_name: ItemName) -> Result<()> {
+    pub fn rename_file(&mut self, id: FileId, new_name: ItemName) -> Result<(), ArchiveError> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(ItemId::File(id))?;
+        } = self
+            .get_item_entry(ItemId::File(id))
+            .ok_or(ArchiveError::FileNotFound)?;
 
-        let file = self.files.get(&id).unwrap().clone();
+        let file = self.files.get(&id).unwrap();
+        let parent_dir = file.parent_dir;
+        let old_name = file.name.clone();
 
-        self.ensure_no_duplicate_name(&new_name, file.parent_dir)?;
+        self.ensure_no_duplicate_name(&new_name, parent_dir)?;
 
         self.source
             .set_position(entry_addr + (FILE_NAME_OFFSET_IN_ENTRY as u64))?;
@@ -522,8 +535,8 @@ impl<S: Read + Write + Seek> Archive<S> {
 
         self.files.get_mut(&id).unwrap().name.clone_from(&new_name);
 
-        let parent_dir_content = self.dirs_content.get_mut(&file.parent_dir).unwrap();
-        assert!(parent_dir_content.names.remove(&file.name));
+        let parent_dir_content = self.dirs_content.get_mut(&parent_dir).unwrap();
+        assert!(parent_dir_content.names.remove(&old_name));
         assert!(parent_dir_content.names.insert(new_name));
 
         Ok(())
@@ -532,36 +545,23 @@ impl<S: Read + Write + Seek> Archive<S> {
     /// Remove a directory, recursively
     ///
     /// Returns the removed directory entry
-    pub fn remove_dir(&mut self, id: DirectoryId) -> Result<Directory> {
+    pub fn remove_dir(&mut self, id: DirectoryId) -> Result<Directory, ArchiveError> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(ItemId::Directory(id))?;
+        } = self
+            .get_item_entry(ItemId::Directory(id))
+            .ok_or(ArchiveError::DirectoryNotFound)?;
 
-        let sub_dirs = self
-            .dirs
-            .values()
-            .filter_map(|dir| {
-                if dir.parent_dir == DirectoryIdOrRoot::NonRoot(id) {
-                    Some(dir.id)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let sub_files = self
-            .files
-            .values()
-            .filter_map(|file| {
-                if file.parent_dir == DirectoryIdOrRoot::NonRoot(id) {
-                    Some(file.id)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        let (sub_dirs, sub_files) = if let Some(content) = self.dirs_content.get(&DirectoryIdOrRoot::NonRoot(id)) {
+            (
+                content.dirs.iter().copied().collect::<Vec<_>>(),
+                content.files.iter().copied().collect::<Vec<_>>(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         // Remove sub-directories, recursively
         for sub_dir in sub_dirs {
@@ -607,12 +607,14 @@ impl<S: Read + Write + Seek> Archive<S> {
     /// Remove a file
     ///
     /// Returns the removed file entry
-    pub fn remove_file(&mut self, id: FileId) -> Result<File> {
+    pub fn remove_file(&mut self, id: FileId) -> Result<File, ArchiveError> {
         let SegmentEntry {
             segment_index,
             entry_index,
             entry_addr,
-        } = self.get_item_entry(ItemId::File(id))?;
+        } = self
+            .get_item_entry(ItemId::File(id))
+            .ok_or(ArchiveError::FileNotFound)?;
 
         // Remove the file entry itself
         self.source.set_position(entry_addr)?;
@@ -633,7 +635,7 @@ impl<S: Read + Write + Seek> Archive<S> {
         assert!(parent_dir_content.names.remove(&file.name));
 
         // Update coverage
-        self.coverage.mark_as_free(Segment {
+        let _ = self.coverage.mark_as_free(Segment {
             start: file.content_addr,
             len: file.content_len,
         });
@@ -642,14 +644,14 @@ impl<S: Read + Write + Seek> Archive<S> {
     }
 
     /// Flush all changes
-    pub fn flush(&mut self) -> Result<()> {
-        self.source.flush()
+    pub fn flush(&mut self) -> Result<(), ArchiveError> {
+        Ok(self.source.flush()?)
     }
 
     /// Close the archive
     ///
     /// Returns the original source provided at type construction
-    pub fn close(mut self) -> Result<S> {
+    pub fn close(mut self) -> Result<S, ArchiveError> {
         self.source.flush()?;
         Ok(self.source.into_inner())
     }
@@ -669,21 +671,21 @@ impl<S: Read + Write + Seek> Archive<S> {
         }
     }
 
-    fn get_item_entry(&self, item_id: ItemId) -> Result<SegmentEntry> {
+    fn get_item_entry(&self, item_id: ItemId) -> Option<SegmentEntry> {
         self.file_segments
             .iter()
             .enumerate()
             .find_map(|(segment_index, segment)| {
                 let entry_index = match item_id {
-                    ItemId::Directory(id) => {
-                        segment.dirs.iter().flatten().position(|dir| dir.id == id)
-                    }
+                    ItemId::Directory(id) => segment
+                        .dirs
+                        .iter()
+                        .position(|entry| entry.as_ref().is_some_and(|dir| dir.id == id)),
 
                     ItemId::File(id) => segment
                         .files
                         .iter()
-                        .flatten()
-                        .position(|file| file.id == id),
+                        .position(|entry| entry.as_ref().is_some_and(|file| file.id == id)),
                 };
 
                 entry_index.map(|entry_index| {
@@ -694,15 +696,11 @@ impl<S: Read + Write + Seek> Archive<S> {
                         entry_index,
                         entry_addr: self.segment_addr(segment_index)
                             + match item_id {
-                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32),
-                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32),
+                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32).expect("entry index is in bounds"),
+                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32).expect("entry index is in bounds"),
                             },
                     }
                 })
-            })
-            .context(match item_id {
-                ItemId::Directory(_) => "Directory not found",
-                ItemId::File(_) => "File not found",
             })
     }
 
@@ -710,7 +708,7 @@ impl<S: Read + Write + Seek> Archive<S> {
     fn write_data_where_possible(
         &mut self,
         mut data: Source<impl Read + Seek>,
-    ) -> Result<(u64, Sha3_256)> {
+    ) -> Result<(u64, Sha3_256), ArchiveError> {
         let len = data.seek_len()?;
 
         let (addr, growing) = match self.coverage.find_free_zone_for(len) {
@@ -750,7 +748,7 @@ impl<S: Read + Write + Seek> Archive<S> {
     }
 
     // returns address of first entry
-    fn create_segment(&mut self) -> Result<usize> {
+    fn create_segment(&mut self) -> Result<usize, ArchiveError> {
         let segment = FileTableSegment {
             next_segment_addr: None,
             dirs: vec![
@@ -783,40 +781,45 @@ impl<S: Read + Write + Seek> Archive<S> {
         Ok(self.file_segments.len() - 1)
     }
 
-    fn get_addr_for_item_insert(&mut self, item_type: ItemType) -> Result<SegmentEntry> {
+    fn get_addr_for_item_insert(
+        &mut self,
+        item_type: ItemType,
+    ) -> Result<SegmentEntry, ArchiveError> {
         let free_entry_addr =
             match item_type {
                 ItemType::Directory => {
-                    // TODO: reverse search as it's more likely free entries are the end
                     self.file_segments
                         .iter()
                         .enumerate()
+                        .rev()
                         .find_map(|(segment_index, segment)| {
-                            segment.dirs.iter().position(|entry| entry.is_none()).map(
+                            segment.dirs.iter().rposition(|entry| entry.is_none()).map(
                                 |entry_index| SegmentEntry {
                                     segment_index,
                                     entry_index,
                                     entry_addr: self.segment_addr(segment_index)
                                         + segment
-                                            .dir_entry_offset(u32::try_from(entry_index).unwrap()),
+                                            .dir_entry_offset(u32::try_from(entry_index).unwrap())
+                                            .expect("entry index is in bounds"),
                                 },
                             )
                         })
                 }
 
                 ItemType::File => {
-                    // TODO: same thing here
                     self.file_segments
                         .iter()
                         .enumerate()
+                        .rev()
                         .find_map(|(segment_index, segment)| {
-                            segment.files.iter().position(|entry| entry.is_none()).map(
+                            segment.files.iter().rposition(|entry| entry.is_none()).map(
                                 |entry_index| SegmentEntry {
                                     segment_index,
                                     entry_index,
                                     entry_addr: self.segment_addr(segment_index)
                                         + segment
-                                            .file_entry_offset(u32::try_from(entry_index).unwrap()),
+                                            .file_entry_offset(u32::try_from(entry_index).unwrap())
+                                            .expect("entry index is in bounds"),
                                 },
                             )
                         })
@@ -835,31 +838,40 @@ impl<S: Read + Write + Seek> Archive<S> {
                     entry_index: 0,
                     entry_addr: self.segment_addr(segment_index)
                         + match item_type {
-                            ItemType::Directory => segment.dir_entry_offset(0),
-                            ItemType::File => segment.file_entry_offset(0),
+                            ItemType::Directory => segment.dir_entry_offset(0).expect("new segment has at least one dir slot"),
+                            ItemType::File => segment.file_entry_offset(0).expect("new segment has at least one file slot"),
                         },
                 })
             }
         }
     }
 
-    fn ensure_no_duplicate_name(&self, name: &str, parent_dir: DirectoryIdOrRoot) -> Result<()> {
+    fn ensure_no_duplicate_name(
+        &self,
+        name: &str,
+        parent_dir: DirectoryIdOrRoot,
+    ) -> Result<(), ArchiveError> {
         let parent_dir_content = self
             .dirs_content
             .get(&parent_dir)
-            .context("Provided parent directory ID does not exist")?;
+            .ok_or(ArchiveError::DirectoryNotFound)?;
 
         if !parent_dir_content.names.contains(name) {
             Ok(())
         } else {
-            bail!(
-                "An item named '{name}' already exists in {}",
-                match parent_dir {
+            Err(ArchiveError::DuplicateName {
+                name: name.to_owned(),
+                parent_dir: match parent_dir {
                     DirectoryIdOrRoot::Root => "root directory".to_owned(),
-                    DirectoryIdOrRoot::NonRoot(id) =>
-                        format!("parent directory '{}'", self.get_dir(id).unwrap().name),
-                }
-            );
+                    DirectoryIdOrRoot::NonRoot(id) => {
+                        format!(
+                            "parent directory '{}'",
+                            self.get_dir(id)
+                                .map_or_else(|| format!("{id:?}"), |dir| dir.name.to_string())
+                        )
+                    }
+                },
+            })
         }
     }
 }
@@ -875,7 +887,6 @@ impl Archive<StdFile> {
             .read(true)
             .write(false)
             .open(path.as_ref())
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
             .map_err(ArchiveMetadataDecodingError::IoError)?;
 
         Archive::open(file, conf)
@@ -891,36 +902,69 @@ impl Archive<StdFile> {
             .read(true)
             .write(true)
             .open(path.as_ref())
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))
             .map_err(ArchiveMetadataDecodingError::IoError)?;
 
         Archive::open(file, conf)
     }
 
     /// Create an archive (on disk) in writable mode
-    pub fn create_as_file(path: impl AsRef<Path>, conf: ArchiveConfig) -> Result<Self> {
-        let file = StdFile::create_new(path.as_ref())
-            .with_context(|| format!("Failed to open file at path: {}", path.as_ref().display()))?;
-        // .map_err(ArchiveDecodingError::IoError)?; // TODO
+    pub fn create_as_file(
+        path: impl AsRef<Path>,
+        conf: ArchiveConfig,
+    ) -> Result<Self, ArchiveError> {
+        let file = StdFile::create_new(path.as_ref()).map_err(ArchiveError::Io)?;
 
         Archive::create(file, conf)
     }
 }
 
-/// Error while decoding an archive's metadata
-#[derive(Debug)]
+/// Error while decoding an archive's metadata (at open time)
+#[derive(Error, Debug)]
 pub enum ArchiveMetadataDecodingError {
     /// Native I/O error
-    IoError(anyhow::Error),
+    #[error("I/O error: {0}")]
+    IoError(std::io::Error),
 
     /// Header is invalid
-    InvalidHeader(anyhow::Error),
+    #[error("{0}")]
+    InvalidHeader(#[from] HeaderDecodingError),
 
     /// One of the file tables' segments is invalid
-    InvalidFileTableSegment(FileTableSegmentDecodingError),
+    #[error("{0}")]
+    InvalidFileTableSegment(#[from] FileTableSegmentDecodingError),
 
     /// The file table contains some incorrect data
+    #[error("File table correctness errors: {0:?}")]
     FileTableCorrectnessError(Vec<FileTableCorrectnessError>),
+}
+
+/// Error while performing read/write operations on an archive
+#[derive(Error, Debug)]
+pub enum ArchiveError {
+    /// Native I/O error
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// An item with the same name already exists in the parent directory
+    #[error("An item named '{name}' already exists in {parent_dir}")]
+    DuplicateName {
+        /// Name that caused the conflict
+        name: String,
+        /// Description of the parent directory
+        parent_dir: String,
+    },
+
+    /// The requested directory was not found in the archive
+    #[error("Directory was not found in archive")]
+    DirectoryNotFound,
+
+    /// The requested file was not found in the archive
+    #[error("File was not found in archive")]
+    FileNotFound,
+
+    /// An error occurred while reading a file's content
+    #[error("{0}")]
+    FileReader(#[from] FileReaderError),
 }
 
 /// ID of an item, unique inside a given archive

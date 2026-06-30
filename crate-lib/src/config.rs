@@ -1,6 +1,7 @@
 use std::num::NonZero;
 
 /// Configuration of an archive's behaviour
+#[derive(Clone)]
 pub struct ArchiveConfig {
     /// Maximum number of directory entries per file table segment
     pub default_dirs_capacity_by_ft_segment: NonZero<u32>,

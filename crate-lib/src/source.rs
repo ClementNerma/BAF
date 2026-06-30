@@ -1,13 +1,12 @@
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 
-use anyhow::{Context, Result};
-
 /// Represent a source from which an [`crate::archive::Archive`] can be opened.
 ///
 /// The source may be read-only or read & write.
 ///
 /// It basically wraps an existing `Read` / `Write` stream through a buffered reader,
 /// exposing utility functions that allow easier reading and writing.
+#[derive(Debug)]
 pub(crate) struct Source<S: Read> {
     reader: BufReader<S>,
 }
@@ -23,26 +22,21 @@ impl<S: Read> Source<S> {
     /// Read as many bytes as needed to fill the provided buffer
     ///
     /// If not enough bytes can be read, an error will be returned.
-    pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
-        self.reader.read_exact(buf).with_context(|| {
-            format!(
-                "Failed to read the requested {} bytes from source",
-                buf.len()
-            )
-        })
+    pub fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
+        self.reader.read_exact(buf)
     }
 
     /// Read a constant number of bytes and return the resulting array
     ///
     /// If not enough bytes can be read, an error will be returned.
-    pub fn read_into_array<const LEN: usize>(&mut self) -> Result<[u8; LEN]> {
+    pub fn read_into_array<const LEN: usize>(&mut self) -> std::io::Result<[u8; LEN]> {
         let mut buf = [0; LEN];
         self.read_exact(&mut buf)?;
         Ok(buf)
     }
 
     /// Call [`FromSourceBytes::read_from`] on `self`
-    pub fn read_value<T: FromSourceBytes>(&mut self) -> Result<T> {
+    pub fn read_value<T: FromSourceBytes>(&mut self) -> std::io::Result<T> {
         T::read_from(self)
     }
 
@@ -54,32 +48,28 @@ impl<S: Read> Source<S> {
 
 impl<S: Read + Seek> Source<S> {
     /// Set the stream's position
-    pub fn set_position(&mut self, pos: u64) -> Result<()> {
-        self.reader
-            .seek(SeekFrom::Start(pos))
-            .with_context(|| format!("Failed to seek source at byte {pos}"))?;
-
+    pub fn set_position(&mut self, pos: u64) -> std::io::Result<()> {
+        self.reader.seek(SeekFrom::Start(pos))?;
         Ok(())
     }
 
     /// Get the current stream's position
-    pub fn position(&mut self) -> Result<u64> {
-        self.reader
-            .stream_position()
-            .context("Failed to get current cursor's position")
+    pub fn position(&mut self) -> std::io::Result<u64> {
+        self.reader.stream_position()
     }
 
     /// Advance the stream's position
-    pub fn advance(&mut self, bytes: usize) -> Result<()> {
-        self.reader
-            .seek_relative(i64::try_from(bytes).unwrap())
-            .with_context(|| format!("Failed to advance source of {bytes} bytes"))
+    pub fn advance(&mut self, bytes: usize) -> std::io::Result<()> {
+        let bytes = i64::try_from(bytes).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "advance offset too large")
+        })?;
+        self.reader.seek_relative(bytes)
     }
 
     /// Seek the stream's total length
-    pub fn seek_len(&mut self) -> Result<u64> {
+    pub fn seek_len(&mut self) -> std::io::Result<u64> {
         // TODO: remove once https://github.com/rust-lang/rust/issues/59359 is resolved
-        fn stream_len_default(stream: &mut impl Seek) -> Result<u64> {
+        fn stream_len_default(stream: &mut impl Seek) -> std::io::Result<u64> {
             let old_pos = stream.stream_position()?;
             let len = stream.seek(SeekFrom::End(0))?;
             stream.seek(SeekFrom::Start(old_pos))?;
@@ -99,34 +89,26 @@ impl<S: Read + Write> Source<S> {
     /// Write the provided buffer
     ///
     /// Calling [`Self::flush`] will be required to avoid losing data.
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<()> {
-        self.reader
-            .get_mut()
-            .write_all(buf)
-            .with_context(|| format!("Failed to write the provided {} bytes buffer", buf.len()))?;
-
-        Ok(())
+    pub fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.reader.get_mut().write_all(buf)
     }
 
     /// Flush all changes to the underlying stream
-    pub fn flush(&mut self) -> Result<()> {
-        self.reader
-            .get_mut()
-            .flush()
-            .context("Failed to flush the source")
+    pub fn flush(&mut self) -> std::io::Result<()> {
+        self.reader.get_mut().flush()
     }
 }
 
 /// A trait representing a value that can be read from a source
 pub trait FromSourceBytes {
     /// Read the required bytes to make the value from the provided source
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized;
 }
 
 impl FromSourceBytes for u8 {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {
@@ -137,7 +119,7 @@ impl FromSourceBytes for u8 {
 }
 
 impl FromSourceBytes for u16 {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {
@@ -146,7 +128,7 @@ impl FromSourceBytes for u16 {
 }
 
 impl FromSourceBytes for u32 {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {
@@ -155,7 +137,7 @@ impl FromSourceBytes for u32 {
 }
 
 impl FromSourceBytes for u64 {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {
@@ -164,7 +146,7 @@ impl FromSourceBytes for u64 {
 }
 
 impl<const N: usize, F: FromSourceBytes + Copy + Default> FromSourceBytes for [F; N] {
-    fn read_from(source: &mut Source<impl Read>) -> Result<Self>
+    fn read_from(source: &mut Source<impl Read>) -> std::io::Result<Self>
     where
         Self: Sized,
     {

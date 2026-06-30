@@ -25,19 +25,20 @@ mod tests;
 
 // Re-export useful types directly from the root
 pub use self::{
-    archive::{Archive, ArchiveMetadataDecodingError, DirEntry, ItemId},
+    archive::{Archive, ArchiveError, ArchiveMetadataDecodingError, DirEntry, ItemId},
     config::ArchiveConfig,
     data::{
         directory::{Directory, DirectoryDecodingError, DirectoryId, DirectoryIdOrRoot},
         file::{File, FileDecodingError, FileId},
+        header::HeaderDecodingError,
         name::{ItemName, NameDecodingError, NameDecodingErrorReason, NameValidationError},
-        path::PathInArchive,
-        timestamp::Timestamp,
+        path::{PathError, PathInArchive},
+        timestamp::{Timestamp, TimestampError},
     },
-    file_reader::FileReader,
+    file_reader::{FileReader, FileReaderError},
     health::FileTableCorrectnessError,
     iter::ArchiveIter,
-    with_paths::{ItemIdOrRoot, WithPaths},
+    with_paths::{ItemIdOrRoot, PathAccessError, WithPaths},
     with_paths_mut::WithPathsMut,
 };
 

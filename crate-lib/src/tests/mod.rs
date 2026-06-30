@@ -1,2 +1,13 @@
+mod archive;
 mod complex;
 mod coverage;
+mod file_reader;
+mod fuzz_archive_open;
+mod fuzz_name_decode;
+mod fuzz_path_new;
+mod fuzz_roundtrip;
+mod header;
+mod iter;
+mod name;
+mod path;
+mod with_paths;

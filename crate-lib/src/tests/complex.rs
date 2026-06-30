@@ -1,31 +1,30 @@
 use std::{
     io::{Cursor, Read, Seek, Write},
-    num::NonZero,
     ops::Deref,
 };
-
-use anyhow::Result;
 
 use tempfile::NamedTempFile;
 
 use crate::{
-    Archive, ArchiveConfig, DirEntry, DirectoryId, DirectoryIdOrRoot, FileId, ItemName, Timestamp,
+    Archive, ArchiveConfig, DirEntry, DirectoryIdOrRoot, ItemName, Timestamp,
 };
 
 static FILE_CONTENT: &[u8] = b"Hello world!";
 
 #[test]
-fn test_in_memory() -> Result<()> {
+fn test_in_memory() -> Result<(), Box<dyn std::error::Error>> {
     perform_tests_with(|| Cursor::new(vec![]))
 }
 
 #[test]
-fn test_on_real_file() -> Result<()> {
+fn test_on_real_file() -> Result<(), Box<dyn std::error::Error>> {
     let test_file = NamedTempFile::new().unwrap();
     perform_tests_with(|| test_file.as_file())
 }
 
-fn perform_tests_with<S: Read + Write + Seek>(create_source: impl Fn() -> S + Clone) -> Result<()> {
+fn perform_tests_with<S: Read + Write + Seek>(
+    create_source: impl Fn() -> S + Clone,
+) -> Result<(), Box<dyn std::error::Error>> {
     perform_complex_manipulations(create_source)?;
 
     Ok(())
@@ -33,7 +32,7 @@ fn perform_tests_with<S: Read + Write + Seek>(create_source: impl Fn() -> S + Cl
 
 fn perform_complex_manipulations<S: Read + Write + Seek>(
     create_source: impl Fn() -> S,
-) -> Result<()> {
+) -> Result<(), Box<dyn std::error::Error>> {
     // Create archive
     let source = create_source();
 
@@ -123,28 +122,26 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
 
     assert_eq!(
         archive
-            .read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(
-                NonZero::new(1).unwrap()
-            )))
+            .read_dir(DirectoryIdOrRoot::NonRoot(directory_id))
             .unwrap()
             .count(),
         1
     );
     assert!(
-        matches!(archive.read_dir(DirectoryIdOrRoot::NonRoot(DirectoryId(NonZero::new(1).unwrap()))).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
+        matches!(archive.read_dir(DirectoryIdOrRoot::NonRoot(directory_id)).unwrap().next().unwrap(), DirEntry::File(file) if file.name.deref() == "file_renamed")
     );
 
     let mut file_content = vec![];
 
     archive
-        .read_file(FileId(NonZero::new(2).unwrap()))
+        .read_file(file_id)
         .unwrap()
         .read_to_end(&mut file_content)
         .unwrap();
 
     assert_eq!(file_content, FILE_CONTENT);
 
-    let mut file_reader = archive.read_file(FileId(NonZero::new(2).unwrap())).unwrap();
+    let mut file_reader = archive.read_file(file_id).unwrap();
     let mut file_content = vec![];
 
     assert_eq!(
@@ -158,13 +155,13 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
     let new_timestamp = Timestamp::now();
     archive
         .replace_file_content(
-            FileId(NonZero::new(2).unwrap()),
+            file_id,
             new_timestamp,
             Cursor::new(vec![1]),
         )
         .unwrap();
 
-    let file = archive.get_file(FileId(NonZero::new(2).unwrap())).unwrap();
+    let file = archive.get_file(file_id).unwrap();
 
     assert_eq!(file.modif_time, new_timestamp);
     assert_eq!(file.content_len, 1);
@@ -172,7 +169,7 @@ fn perform_complex_manipulations<S: Read + Write + Seek>(
     let stream = archive.close().unwrap();
     let archive = Archive::open(stream, ArchiveConfig::default()).unwrap();
 
-    let file = archive.get_file(FileId(NonZero::new(2).unwrap())).unwrap();
+    let file = archive.get_file(file_id).unwrap();
 
     assert_eq!(file.modif_time, new_timestamp);
     assert_eq!(file.content_len, 1);

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use anyhow::{Result, anyhow, bail};
+use thiserror::Error;
 
 use super::name::{ItemName, NameValidationError};
 
@@ -8,6 +8,7 @@ use super::name::{ItemName, NameValidationError};
 /// Representation of a path inside an archive
 ///
 /// Similar to [`std::path::PathBuf`], but only made of components compatible with [`ItemName`]'s rules
+#[derive(Debug)]
 pub struct PathInArchive(Vec<ItemName>);
 
 impl PathInArchive {
@@ -16,9 +17,9 @@ impl PathInArchive {
     /// Handles `.` and `..` symbol, prevents escapes from root
     ///
     /// Does not preserve the root symbol (`/` at the beginning of a path)
-    pub fn new(path: &str) -> Result<Self> {
+    pub fn new(path: &str) -> Result<Self, PathError> {
         if path.is_empty() {
-            bail!("Path cannot be empty");
+            return Err(PathError::EmptyPath);
         }
 
         let mut out = vec![];
@@ -33,13 +34,19 @@ impl PathInArchive {
 
                 // Parent directory
                 ".." => {
-                    out.pop();
+                    if out.pop().is_none() {
+                        return Err(PathError::RootEscape);
+                    }
                 }
 
                 // Normal component
                 _ => {
                     out.push(ItemName::new(component.to_owned()).map_err(|err| {
-                        anyhow!("In path '{path}': component '{component}' is invalid: {err}")
+                        PathError::InvalidComponent {
+                            path: path.to_owned(),
+                            component: component.to_owned(),
+                            err,
+                        }
                     })?);
                 }
             }
@@ -50,7 +57,10 @@ impl PathInArchive {
 
     // TODO: unnecessarily allocates
     /// Create a path from a suite of components
-    pub fn from_components(components: &[&str]) -> Result<Self> {
+    pub fn from_components(components: &[&str]) -> Result<Self, PathError> {
+        if components.is_empty() {
+            return Ok(Self::empty());
+        }
         Self::new(&components.join("/"))
     }
 
@@ -125,4 +135,27 @@ impl Display for PathInArchive {
 
         Ok(())
     }
+}
+
+/// Error while parsing a path inside an archive
+#[derive(Error, Debug)]
+pub enum PathError {
+    /// The provided path is empty
+    #[error("Path cannot be empty")]
+    EmptyPath,
+
+    /// A path component failed name validation
+    #[error("In path '{path}': component '{component}' is invalid: {err}")]
+    InvalidComponent {
+        /// The full path being parsed
+        path: String,
+        /// The component that failed validation
+        component: String,
+        /// The underlying validation error
+        err: NameValidationError,
+    },
+
+    /// Attempted to traverse above the archive root using `..`
+    #[error("Cannot traverse above the archive root")]
+    RootEscape,
 }

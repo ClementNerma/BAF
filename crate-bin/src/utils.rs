@@ -34,7 +34,7 @@ pub fn human_size(size: u64, precision: Option<u8>) -> String {
 ///
 /// The `precision` parameter is the number of floating-point decimals to keep.
 fn approx_int_div(a: u64, b: u64, precision: u8) -> String {
-    let max_prec = 10_u128.pow(u32::from(precision));
+    let max_prec = 10_u128.pow(u32::from(precision.min(38)));
 
     let div = u128::from(a) * max_prec * 10 / u128::from(b);
     let div = (div / 10) + if div % 10 >= 5 { 1 } else { 0 };

@@ -1,5 +1,7 @@
 use std::io::{Read, Seek};
 
+use thiserror::Error;
+
 use crate::ensure_only_one_version;
 
 use super::{
@@ -117,17 +119,23 @@ impl FileTableSegment {
         bytes
     }
 
-    pub fn dir_entry_offset(&self, index: u32) -> u64 {
-        assert!(index < u32::try_from(self.dirs.len()).unwrap());
+    pub fn dir_entry_offset(&self, index: u32) -> Option<u64> {
+        if index >= u32::try_from(self.dirs.len()).unwrap() {
+            return None;
+        }
 
-        16 + u64::from(index) * (DIRECTORY_ENTRY_SIZE as u64)
+        Some(16 + u64::from(index) * (DIRECTORY_ENTRY_SIZE as u64))
     }
 
-    pub fn file_entry_offset(&self, index: u32) -> u64 {
-        assert!(index < u32::try_from(self.files.len()).unwrap());
+    pub fn file_entry_offset(&self, index: u32) -> Option<u64> {
+        if index >= u32::try_from(self.files.len()).unwrap() {
+            return None;
+        }
 
-        16 + (u64::try_from(self.dirs.len()).unwrap() * (DIRECTORY_ENTRY_SIZE as u64))
-            + (u64::from(index) * (FILE_ENTRY_SIZE as u64))
+        Some(
+            16 + (u64::try_from(self.dirs.len()).unwrap() * (DIRECTORY_ENTRY_SIZE as u64))
+                + (u64::from(index) * (FILE_ENTRY_SIZE as u64)),
+        )
     }
 
     pub fn dirs(&self) -> &[Option<Directory>] {
@@ -158,17 +166,31 @@ impl FileTableSegment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum FileTableSegmentDecodingError {
-    // TODO: add context
-    InvalidHeader(anyhow::Error),
-    IoError(anyhow::Error),
+    /// An I/O error occurred while reading the segment header
+    #[error("I/O error while reading segment header: {0}")]
+    InvalidHeader(std::io::Error),
+
+    /// An I/O error occurred
+    #[error("I/O error: {0}")]
+    IoError(std::io::Error),
+
+    /// A directory entry in the segment is invalid
+    #[error("Invalid directory entry at offset {ft_entry_addr}: {err}")]
     InvalidDirectoryEntry {
+        /// File table entry address
         ft_entry_addr: u64,
+        /// The underlying decoding error
         err: DirectoryDecodingError,
     },
+
+    /// A file entry in the segment is invalid
+    #[error("Invalid file entry at offset {ft_entry_addr}: {err}")]
     InvalidFileEntry {
+        /// File table entry address
         ft_entry_addr: u64,
+        /// The underlying decoding error
         err: FileDecodingError,
     },
 }
