@@ -2,6 +2,8 @@
 name = "baf"
 version = "0.1.2"
 edition = "2024"
+description = "Library for interacting with Basic Archive Format"
+license = "Apache-2.0"
 
 [dependencies]
 sha3 = "0.12.0"
