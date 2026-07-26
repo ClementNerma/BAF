@@ -149,9 +149,9 @@ impl<'a, S: Read + Seek> WithPaths<'a, S> {
             .ok_or(PathAccessError::ItemNotFound)?
         {
             ItemIdOrRoot::Root => Ok(self.archive.read_dir(DirectoryIdOrRoot::Root)?),
-            ItemIdOrRoot::NonRootDirectory(dir_id) => Ok(self
-                .archive
-                .read_dir(DirectoryIdOrRoot::NonRoot(dir_id))?),
+            ItemIdOrRoot::NonRootDirectory(dir_id) => {
+                Ok(self.archive.read_dir(DirectoryIdOrRoot::NonRoot(dir_id))?)
+            }
             ItemIdOrRoot::File(_) => Err(PathAccessError::FileExistsAtPath),
         }
     }

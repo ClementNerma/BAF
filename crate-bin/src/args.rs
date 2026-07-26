@@ -76,4 +76,9 @@ pub enum Action {
         )]
         overwrite_files: bool,
     },
+
+    Delete {
+        #[clap(help = "Items to delete (files or directories)", required = true)]
+        items_to_delete: Vec<String>,
+    },
 }

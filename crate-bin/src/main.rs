@@ -3,7 +3,7 @@
 #![warn(unused_crate_dependencies)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io,
     num::NonZero,
@@ -16,7 +16,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use baf::{Archive, ArchiveConfig, DirEntry, DirectoryIdOrRoot, ItemId, ItemIdOrRoot, Timestamp};
 use clap::Parser;
 use colored::Colorize;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use walkdir::WalkDir;
 
 use self::{
@@ -222,7 +222,13 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                 debug!(
                     "> Adding file: {} ({})",
                     real_path.display(),
-                    human_size(*files_size.get(&real_path).with_context(|| format!("Failed to get size for file '{}'", real_path.display()))?, Some(2))
+                    human_size(
+                        *files_size.get(&real_path).with_context(|| format!(
+                            "Failed to get size for file '{}'",
+                            real_path.display()
+                        ))?,
+                        Some(2)
+                    )
                 );
 
                 let file = File::open(real_path)
@@ -391,6 +397,72 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                 "Successfully extracted archive to '{}'",
                 output_dir.display()
             );
+        }
+
+        Action::Delete { items_to_delete } => {
+            let mut archive = Archive::open_from_file(&path, ArchiveConfig::default())
+                .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
+
+            let mut to_delete_ids = HashSet::new();
+
+            for item_path in items_to_delete {
+                let item = archive
+                    .with_paths()
+                    .get_item_at(&item_path)
+                    .with_context(|| {
+                        format!("Failed to find item at path '{}' in archive", item_path)
+                    })?;
+
+                match item {
+                    ItemIdOrRoot::Root => bail!("The archive's root directory cannot be deleted."),
+
+                    ItemIdOrRoot::NonRootDirectory(dir) => {
+                        to_delete_ids.insert(ItemId::Directory(dir));
+                    }
+
+                    ItemIdOrRoot::File(file) => {
+                        to_delete_ids.insert(ItemId::File(file));
+                    }
+                }
+            }
+
+            for item in to_delete_ids {
+                match item {
+                    ItemId::Directory(dir_id) => {
+                        if archive.get_dir(dir_id).is_some() {
+                            debug!(
+                                "Deleting directory from archive: {}",
+                                archive.with_paths().compute_dir_path(dir_id).unwrap()
+                            );
+
+                            archive.remove_dir(dir_id)?;
+                        } else {
+                            trace!(
+                                "Directory with ID {dir_id:?} does not exist anymore in archive, skipping deletion"
+                            );
+                        }
+                    }
+
+                    ItemId::File(file_id) => {
+                        if archive.get_file(file_id).is_some() {
+                            debug!(
+                                "Deleting file from archive: {}",
+                                archive.with_paths().compute_file_path(file_id).unwrap()
+                            );
+
+                            archive.remove_file(file_id)?;
+                        } else {
+                            trace!(
+                                "File with ID {file_id:?} does not exist anymore in archive, skipping deletion"
+                            );
+                        }
+                    }
+                }
+            }
+
+            archive.flush().context("Failed to close archive")?;
+
+            info!("Successfully deleted items from archive");
         }
     }
 

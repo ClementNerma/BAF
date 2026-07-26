@@ -554,14 +554,15 @@ impl<S: Read + Write + Seek> Archive<S> {
             .get_item_entry(ItemId::Directory(id))
             .ok_or(ArchiveError::DirectoryNotFound)?;
 
-        let (sub_dirs, sub_files) = if let Some(content) = self.dirs_content.get(&DirectoryIdOrRoot::NonRoot(id)) {
-            (
-                content.dirs.iter().copied().collect::<Vec<_>>(),
-                content.files.iter().copied().collect::<Vec<_>>(),
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (sub_dirs, sub_files) =
+            if let Some(content) = self.dirs_content.get(&DirectoryIdOrRoot::NonRoot(id)) {
+                (
+                    content.dirs.iter().copied().collect::<Vec<_>>(),
+                    content.files.iter().copied().collect::<Vec<_>>(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
 
         // Remove sub-directories, recursively
         for sub_dir in sub_dirs {
@@ -696,8 +697,12 @@ impl<S: Read + Write + Seek> Archive<S> {
                         entry_index,
                         entry_addr: self.segment_addr(segment_index)
                             + match item_id {
-                                ItemId::Directory(_) => segment.dir_entry_offset(entry_index_u32).expect("entry index is in bounds"),
-                                ItemId::File(_) => segment.file_entry_offset(entry_index_u32).expect("entry index is in bounds"),
+                                ItemId::Directory(_) => segment
+                                    .dir_entry_offset(entry_index_u32)
+                                    .expect("entry index is in bounds"),
+                                ItemId::File(_) => segment
+                                    .file_entry_offset(entry_index_u32)
+                                    .expect("entry index is in bounds"),
                             },
                     }
                 })
@@ -788,11 +793,8 @@ impl<S: Read + Write + Seek> Archive<S> {
         let free_entry_addr =
             match item_type {
                 ItemType::Directory => {
-                    self.file_segments
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find_map(|(segment_index, segment)| {
+                    self.file_segments.iter().enumerate().rev().find_map(
+                        |(segment_index, segment)| {
                             segment.dirs.iter().rposition(|entry| entry.is_none()).map(
                                 |entry_index| SegmentEntry {
                                     segment_index,
@@ -803,15 +805,13 @@ impl<S: Read + Write + Seek> Archive<S> {
                                             .expect("entry index is in bounds"),
                                 },
                             )
-                        })
+                        },
+                    )
                 }
 
                 ItemType::File => {
-                    self.file_segments
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find_map(|(segment_index, segment)| {
+                    self.file_segments.iter().enumerate().rev().find_map(
+                        |(segment_index, segment)| {
                             segment.files.iter().rposition(|entry| entry.is_none()).map(
                                 |entry_index| SegmentEntry {
                                     segment_index,
@@ -822,7 +822,8 @@ impl<S: Read + Write + Seek> Archive<S> {
                                             .expect("entry index is in bounds"),
                                 },
                             )
-                        })
+                        },
+                    )
                 }
             };
 
@@ -838,8 +839,12 @@ impl<S: Read + Write + Seek> Archive<S> {
                     entry_index: 0,
                     entry_addr: self.segment_addr(segment_index)
                         + match item_type {
-                            ItemType::Directory => segment.dir_entry_offset(0).expect("new segment has at least one dir slot"),
-                            ItemType::File => segment.file_entry_offset(0).expect("new segment has at least one file slot"),
+                            ItemType::Directory => segment
+                                .dir_entry_offset(0)
+                                .expect("new segment has at least one dir slot"),
+                            ItemType::File => segment
+                                .file_entry_offset(0)
+                                .expect("new segment has at least one file slot"),
                         },
                 })
             }
@@ -968,7 +973,7 @@ pub enum ArchiveError {
 }
 
 /// ID of an item, unique inside a given archive
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum ItemId {
     /// ID of a directory
     Directory(DirectoryId),
