@@ -53,8 +53,7 @@ pub enum Action {
         #[clap(
             short = 'i',
             long = "items",
-            help = "Items to extract (files or directories) (default: extract everything)",
-            required = true
+            help = "Items to extract (files or directories) (default: extract everything)"
         )]
         items_to_extract: Vec<String>,
 
