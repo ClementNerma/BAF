@@ -26,7 +26,7 @@ pub enum Action {
     Tree,
 
     Add {
-        #[clap(help = "Items to add (files or directories)", num_args = 1..)]
+        #[clap(help = "Items to add (files or directories)", required = true)]
         items_path: Vec<PathBuf>,
 
         #[clap(
@@ -54,7 +54,7 @@ pub enum Action {
             short = 'i',
             long = "items",
             help = "Items to extract (files or directories) (default: extract everything)",
-            num_args = 1..
+            required = true
         )]
         items_to_extract: Vec<String>,
 
