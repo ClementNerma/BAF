@@ -270,8 +270,19 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                     dir
                 }
 
-                None => std::env::current_dir()
-                    .context("Failed to get current directory for extraction")?,
+                None => {
+                    let current_dir = std::env::current_dir()
+                        .context("Failed to get current directory for extraction")?;
+
+                    if items_to_extract.is_empty() {
+                        current_dir.join(
+                            path.file_stem()
+                                .context("Failed to get archive's file stem")?,
+                        )
+                    } else {
+                        current_dir
+                    }
+                }
             };
 
             let mut archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
@@ -319,6 +330,13 @@ fn inner_main(args: CmdArgs) -> Result<()> {
             };
 
             if !merge_dirs {
+                if output_dir.exists() {
+                    bail!(
+                        "Failed to extract archive: output directory '{}' already exists",
+                        output_dir.display()
+                    );
+                }
+
                 for item_id in &archive_items {
                     if let ItemId::Directory(dir_id) = item_id {
                         let path = archive.with_paths().compute_dir_path(*dir_id)?;
@@ -333,6 +351,13 @@ fn inner_main(args: CmdArgs) -> Result<()> {
                     }
                 }
             }
+
+            fs::create_dir_all(&output_dir).with_context(|| {
+                format!(
+                    "Failed to create output directory at path '{}'",
+                    output_dir.display()
+                )
+            })?;
 
             if !overwrite_files {
                 for item_id in &archive_items {
