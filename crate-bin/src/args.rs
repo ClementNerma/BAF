@@ -9,7 +9,13 @@ pub struct CmdArgs {
     #[clap(help = "Path to the archive")]
     pub path: PathBuf,
 
-    #[clap(short, long, help = "Display verbose output", default_value = "info")]
+    #[clap(
+        short,
+        long,
+        help = "Display verbose output",
+        default_value = "info",
+        global = true
+    )]
     pub verbosity: LevelFilter,
 
     #[clap(subcommand)]
