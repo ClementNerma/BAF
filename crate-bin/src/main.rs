@@ -16,8 +16,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use baf::{Archive, ArchiveConfig, DirEntry, DirectoryIdOrRoot, ItemId, ItemIdOrRoot, Timestamp};
 use clap::Parser;
 use colored::Colorize;
+use jiff::{Zoned, civil};
 use log::{debug, error, info, trace, warn};
 use walkdir::WalkDir;
+use zip::{DateTime, ZipWriter, write::SimpleFileOptions};
 
 use self::{
     args::{Action, CmdArgs},
@@ -489,6 +491,102 @@ fn inner_main(args: CmdArgs) -> Result<()> {
 
             info!("Successfully deleted items from archive");
         }
+
+        Action::Zip { output } => {
+            let output = match output {
+                Some(output) => output,
+                None => {
+                    let mut output = path.clone();
+                    output.set_extension("zip");
+                    output
+                }
+            };
+
+            if output.exists() {
+                bail!(
+                    "Failed to convert archive: output file '{}' already exists",
+                    output.display()
+                );
+            }
+
+            let mut archive = Archive::open_from_file_readonly(path, ArchiveConfig::default())
+                .map_err(|err| anyhow!("Failed to open archive: {err:?}") /* TODO: display instead of debug */)?;
+
+            let archive_items: Vec<_> = archive.items_iter().map(|item| item.id()).collect();
+
+            let output_file = File::create(&output).with_context(|| {
+                format!(
+                    "Failed to create output file at path '{}'",
+                    output.display()
+                )
+            })?;
+
+            let mut zip_writer = ZipWriter::new(output_file);
+
+            for item_id in archive_items {
+                match item_id {
+                    ItemId::Directory(dir_id) => {
+                        let path = archive
+                            .with_paths()
+                            .compute_dir_path(dir_id)
+                            .with_context(|| {
+                                format!("Failed to compute path of directory with ID {dir_id:?}")
+                            })?;
+
+                        debug!("Adding directory to ZIP: {path}");
+
+                        let modif_time = archive
+                            .get_dir(dir_id)
+                            .context("Failed to get directory from archive")?
+                            .modif_time;
+
+                        zip_writer
+                            .add_directory(
+                                path,
+                                SimpleFileOptions::default()
+                                    .last_modified_time(zip_datetime(modif_time)?),
+                            )
+                            .context("Failed to add directory to ZIP")?;
+                    }
+
+                    ItemId::File(file_id) => {
+                        let path = archive
+                            .with_paths()
+                            .compute_file_path(file_id)
+                            .with_context(|| {
+                                format!("Failed to compute path of file with ID {file_id:?}")
+                            })?;
+
+                        debug!("Adding file to ZIP: {path}");
+
+                        let modif_time = archive
+                            .get_file(file_id)
+                            .context("Failed to get file from archive")?
+                            .modif_time;
+
+                        let mut file = archive.read_file(file_id).with_context(|| {
+                            format!("Failed to read file with id {path} from archive")
+                        })?;
+
+                        zip_writer
+                            .start_file(
+                                &path,
+                                SimpleFileOptions::default()
+                                    .last_modified_time(zip_datetime(modif_time)?),
+                            )
+                            .context("Failed to add file to ZIP")?;
+
+                        io::copy(&mut file, &mut zip_writer).with_context(|| {
+                            format!("Failed to write file '{path}' to ZIP")
+                        })?;
+                    }
+                }
+            }
+
+            zip_writer.finish().context("Failed to finalize ZIP file")?;
+
+            info!("Successfully converted archive to '{}'", output.display());
+        }
     }
 
     Ok(())
@@ -611,4 +709,30 @@ fn get_item_mtime(path: &Path) -> Result<Timestamp> {
             });
 
     Ok(Timestamp::try_from(mtime)?)
+}
+
+fn zip_datetime(timestamp: Timestamp) -> Result<DateTime> {
+    let zoned = Zoned::try_from(SystemTime::from(timestamp))
+        .context("Failed to convert modification time")?;
+
+    let civil_datetime: civil::DateTime = zoned.into();
+
+    match DateTime::from_date_and_time(
+        u16::try_from(civil_datetime.year()).unwrap(),
+        u8::try_from(civil_datetime.month()).unwrap(),
+        u8::try_from(civil_datetime.day()).unwrap(),
+        u8::try_from(civil_datetime.hour()).unwrap(),
+        u8::try_from(civil_datetime.minute()).unwrap(),
+        u8::try_from(civil_datetime.second()).unwrap(),
+    ) {
+        Ok(date) => Ok(date),
+
+        Err(err) => {
+            warn!(
+                "WARN: Modification time {timestamp:?} cannot be represented in ZIP format ({err}), falling back to 1980-01-01"
+            );
+
+            Ok(DateTime::DEFAULT)
+        }
+    }
 }

@@ -15,3 +15,4 @@ colored = "3.1.1"
 jiff = "0.2.35"
 log = { version = "0.4.33", features = ["std"] }
 walkdir = "2.5.0"
+zip = "8.6.0"

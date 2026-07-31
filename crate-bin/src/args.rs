@@ -86,4 +86,12 @@ pub enum Action {
         #[clap(help = "Items to delete (files or directories)", required = true)]
         items_to_delete: Vec<String>,
     },
+
+    Zip {
+        #[clap(
+            long = "to",
+            help = "Output ZIP file path (default: BAF path with its extension replaced by .zip)"
+        )]
+        output: Option<PathBuf>,
+    },
 }
