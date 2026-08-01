@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.104"
 baf = { path = "../crate-lib" }
-clap = { version = "4.6.4", features = ["derive"] }
+clap = { version = "4.6.5", features = ["derive"] }
 colored = "3.1.1"
 jiff = "0.2.35"
 log = { version = "0.4.33", features = ["std"] }
